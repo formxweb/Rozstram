@@ -860,6 +860,14 @@ language sql stable as $$
   );
 $$;
 
+-- izlediğim videolar (akış algoritması için; sadece kendi listemi görürüm)
+create or replace function public.my_views() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(post_id), '[]'::jsonb) from (
+    select post_id from public.post_views where viewer = auth.uid() order by created_at desc limit 2000
+  ) v;
+$$;
+
 create or replace function public.bootstrap() returns jsonb
 language sql stable set search_path = public as $$
   with me as (select auth.uid() as id),
@@ -883,6 +891,7 @@ language sql stable set search_path = public as $$
     'blocks', coalesce((select jsonb_agg(b.blocked) from public.blocks b where b.blocker = auth.uid()), '[]'::jsonb),
     'mutes', coalesce((select jsonb_agg(m.target) from public.mutes m where m.owner = auth.uid()), '[]'::jsonb),
     'closeFriends', coalesce((select jsonb_agg(c.friend) from public.close_friends c where c.owner = auth.uid()), '[]'::jsonb),
+    'viewed', public.my_views(),
     'notifications', coalesce((select jsonb_agg(x) from (
         select jsonb_build_object('id', n.id, 'kind', n.kind, 'actor', n.actor, 'post', n.post_id, 'cid', n.comment_id, 'story', n.story_id,
                                   'text', n.text, 'at', public.ms(n.created_at), 'read', n.read_at is not null) x
@@ -1154,7 +1163,7 @@ grant execute on function
   public.story_in_highlight(uuid, uuid), public.is_member(uuid), public.dm_blocked(uuid),
   public.change_username(text), public.update_contact(text, text),
   public.start_dm(uuid), public.create_group(uuid[], text), public.add_group_members(uuid, uuid[]), public.rename_group(uuid, text),
-  public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean), public.view_post(uuid), public.view_count(uuid),
+  public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean), public.view_post(uuid), public.view_count(uuid), public.my_views(),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),

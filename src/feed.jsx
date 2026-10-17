@@ -250,7 +250,7 @@ export function PostCard({ post, live }) {
   const quick = (e) => app.addComment(post.id, e);
 
   return (
-    <article className="post">
+    <article className="post" data-id={post.id}>
       <div className="post-head g">
         <div className="who">
           <Avatar uid={post.author} size={36} ring={app.storyRing(post.author)} onClick={() => (app.storyRing(post.author) ? app.openStories(post.author) : app.openUser(post.author))} />

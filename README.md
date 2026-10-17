@@ -9,6 +9,13 @@ Instagram benzeri, gerçek kişilerle çalışan sosyal uygulama (PWA).
   - `supabase/functions/delete-account`: hesap silme (dosyalar + hesap; kullanıcı adı kilitli kalır).
 - **Ayar:** `config.json` (Supabase adresi + herkese açık anon anahtar).
 
+## Akış algoritması
+
+`src/rank.js` her kullanıcı için kişisel sıralama yapar: etkileştiğin hesaplar (beğeni, yorum, kayıt,
+izleme, takip, yakın arkadaş, mesajlaşma), ilgilendiğin #etiketler, video/fotoğraf tercihin, gönderinin
+takipçi sayısına göre başarısı, tazelik, "İlgilenmiyorum" sinyalleri ve çeşitlilik. Ağırlıklar dosyanın
+başındaki `W` ve `scorePost` içindedir.
+
 ## Yeniden derleme
 
 ```
@@ -21,4 +28,5 @@ python3 build.py --test   # yerel test sunucusuna bağlı derleme
 ```
 bash supabase/test/run.sh        # veritabanı testleri (yerel Postgres)
 bash test/restart.sh && node test/e2e.js && STEP0=40 node test/e2e2.js   # tarayıcı testleri
+node test/rank.test.js           # akış algoritması testleri
 ```

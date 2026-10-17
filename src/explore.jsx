@@ -4,10 +4,6 @@ import { CATEGORIES, fmt, mediaUrl, onKeys, store, tagsOf } from './lib.js';
 import { Empty, Icon, PersonRow, TopBar } from './ui.jsx';
 import { GridTile } from './feed.jsx';
 
-function score(p, cc, now) {
-  return (onKeys(p.likes).length + 2 * (cc[p.id] || 0) + 1) / Math.pow((now - p.at) / 36e5 + 2, 0.7);
-}
-
 export function ExploreScreen() {
   const app = useApp();
   const [q, setQ] = useState('');
@@ -40,14 +36,13 @@ export function ExploreScreen() {
     return Object.keys(m).filter((t) => !term || t.indexOf(term) >= 0).sort((a, b) => m[b] - m[a]).slice(0, 30).map((t) => ({ t, n: m[t] }));
   }, [term, app.visiblePosts]);
   const ranked = useMemo(() => {
-    const now = Date.now();
     let list = app.visiblePosts.filter((p) => !app.hidden[p.id] && !app.mutes[p.author] && p.author !== app.me.id);
     if (cat !== 'all') {
       const c = CATEGORIES.find((x) => x.id === cat);
       list = list.filter((p) => tagsOf(p.caption).some((t) => c.tags.indexOf(t) >= 0));
     }
-    return list.slice().sort((a, b) => score(b, app.commentCount, now) - score(a, app.commentCount, now));
-  }, [app.visiblePosts, app.commentCount, cat, app.hidden, app.mutes, app.me.id]);
+    return app.rankList(list, true);
+  }, [app.visiblePosts, app.rankList, cat, app.hidden, app.mutes, app.me.id]);
   const counts = useMemo(() => {
     const m = {};
     CATEGORIES.forEach((c) => { m[c.id] = app.visiblePosts.filter((p) => tagsOf(p.caption).some((t) => c.tags.indexOf(t) >= 0)).length; });

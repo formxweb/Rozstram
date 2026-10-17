@@ -6,6 +6,7 @@ import {
 } from './backend.js';
 import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo } from './lib.js';
 import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
+import { interestModel, isVideo, rankPosts, scorePost } from './rank.js';
 import { HomeScreen, CommentsSheet, LikesSheet, SendSheet, PostScreen, PeekModal } from './feed.jsx';
 import { ReelsScreen } from './reels.jsx';
 import { StoryViewer } from './stories.jsx';
@@ -21,11 +22,6 @@ const FULLSCREEN = { chat: 1, create: 1, edit: 1, newmsg: 1 };
 const noop = () => {};
 const map = (arr) => { const m = {}; (arr || []).forEach((x) => { m[x.id] = x; }); return m; };
 const flag = (arr) => { const m = {}; (arr || []).forEach((x) => { m[x] = true; }); return m; };
-
-function rankScore(p, commentCount, now) {
-  const likes = onKeys(p.likes).length;
-  return (likes + 2 * (commentCount[p.id] || 0) + 1) / Math.pow((now - p.at) / 36e5 + 2, 0.9);
-}
 
 function App() {
   const [phase, setPhase] = useState('boot');
@@ -45,6 +41,8 @@ function App() {
   const [notifs, setNotifs] = useState([]);
   const [account, setAccount] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [viewed, setViewed] = useState({});
+  const [rankEpoch, setRankEpoch] = useState(0);
   const [conn, setConn] = useState('ok');
   const [peers, setPeers] = useState({});
   const [tab, setTab] = useState('home');
@@ -60,7 +58,7 @@ function App() {
   const [sound, setSound] = useState(false);
   const [theme, setThemeState] = useState(() => store.get('theme', 'system'));
   const [seenLocal, setSeenLocal] = useState(() => store.get('seenStories', {}));
-  const [feedMode, setFeedModeState] = useState(() => store.get('feedMode', 'following'));
+  const [feedMode, setFeedModeState] = useState(() => store.get('feedMode', 'foryou'));
   const [onboarding, setOnboarding] = useState(false);
 
   const toastTimer = useRef(null);
@@ -144,6 +142,8 @@ function App() {
     setCloseFriends(flag(data.closeFriends));
     setNotifs(data.notifications || []);
     setAccount(data.account || null);
+    setViewed(flag(data.viewed));
+    setRankEpoch((e) => e + 1);
     setLoaded(true);
     return true;
   }, [sb, toast]);
@@ -364,21 +364,39 @@ function App() {
   const stories = useMemo(() => Object.keys(storiesMap).map((k) => storiesMap[k]), [storiesMap]);
   const storyById = storiesMap;
 
+  /* ------------------------------------------------ akış algoritması (src/rank.js)
+     İlgi profili ve puanlar açılışta / yenilemede bir kez hesaplanır; beğeni ya da izleme
+     sırasında akış kendi kendine yer değiştirmez, bir sonraki yenilemede güncellenir. */
+  const interest = useMemo(() => interestModel({
+    me: me.id, posts, comments, saved, viewed, hidden,
+    following: Array.from(following), closeFriends: Object.keys(closeFriends),
+    followsMe: followRows.filter((r) => r.t === me.id && r.s === 'accepted').map((r) => r.f),
+    dmPartners: Object.keys(threadsMap).map((k) => threadsMap[k]).filter((t) => !t.isGroup && t.last).map((t) => (t.members.find((x) => x.id !== me.id) || {}).id),
+  }), [rankEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const scoreCache = useRef({ epoch: -1, now: 0, s: {} });
+  const scoreOf = useCallback((p, discover) => {
+    const c = scoreCache.current;
+    if (c.epoch !== rankEpoch) { c.epoch = rankEpoch; c.now = Date.now(); c.s = {}; }
+    const key = (discover ? 'd:' : '') + p.id;
+    if (c.s[key] == null) {
+      c.s[key] = scorePost(p, interest, { me: me.id, now: c.now, commentCount, followerCount, viewed, following, discover: !!discover });
+    }
+    return c.s[key];
+  }, [rankEpoch, interest]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rankList = useCallback((list, discover) => rankPosts(list, (p) => scoreOf(p, discover)), [scoreOf]);
+
   const feed = useMemo(() => {
-    const now = Date.now();
     const vis = visiblePosts.filter((p) => !hidden[p.id] && !mutes[p.author]);
-    const rank = (l) => l.slice().sort((a, b) => rankScore(b, commentCount, now) - rankScore(a, commentCount, now));
-    if (feedMode === 'foryou') return { main: rank(vis), rest: [] };
+    if (feedMode === 'foryou') return { main: rankList(vis), rest: [] };
     const mine = (p) => p.author === me.id || following.has(p.author);
-    return { main: vis.filter(mine), rest: rank(vis.filter((p) => !mine(p))) };
-  }, [visiblePosts, hidden, mutes, feedMode, following, me.id, commentCount]);
+    return { main: vis.filter(mine), rest: rankList(vis.filter((p) => !mine(p)), true) };
+  }, [visiblePosts, hidden, mutes, feedMode, following, me.id, rankList]);
 
   const reelsFor = useCallback((mode) => {
-    const now = Date.now();
-    const vids = visiblePosts.filter((p) => p.media && p.media[0] && p.media[0].type === 'video' && !hidden[p.id] && !mutes[p.author]);
+    const vids = visiblePosts.filter((p) => isVideo(p) && !hidden[p.id] && !mutes[p.author]);
     if (mode === 'following') return vids.filter((p) => following.has(p.author) || p.author === me.id);
-    return vids.slice().sort((a, b) => rankScore(b, commentCount, now) - rankScore(a, commentCount, now));
-  }, [visiblePosts, hidden, mutes, following, me.id, commentCount]);
+    return rankList(vids);
+  }, [visiblePosts, hidden, mutes, following, me.id, rankList]);
 
   const isSeen = useCallback((s) => !!(seenLocal[s.id] || (s.views && s.views[me.id]) || s.author === me.id && seenLocal[s.id]), [seenLocal, me.id]);
   const storyGroups = useMemo(() => {
@@ -496,6 +514,7 @@ function App() {
   const viewPost = (post) => {
     if (!post || post.author === me.id || viewedRef.current[post.id]) return;
     viewedRef.current[post.id] = true;
+    setViewed((m) => ({ ...m, [post.id]: 1 }));
     sb.rpc('view_post', { pid: post.id }).then(({ data }) => {
       if (data === true) setPosts((m) => (m[post.id] ? { ...m, [post.id]: { ...m[post.id], views: (m[post.id].views || 0) + 1 } } : m));
     }, noop);
@@ -1131,7 +1150,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    viewPost, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, rankList, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,
