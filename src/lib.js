@@ -152,6 +152,10 @@ function loadImage(url) {
 // Seçilen dosyayı hemen belleğe kopyalar. Android Chrome, galeriden seçilen dosya sonradan
 // "değişmiş" görünürse yüklemeyi sunucuya göndermeden keser (ERR_UPLOAD_FILE_CHANGED);
 // bellekteki kopya bundan etkilenmez.
+// Müzik adresi: '/music/..' sitedeki hazır kütüphane, diğerleri depolamadaki yönetici yüklemeleri
+export const musicUrl = (m) => (!m || !m.url ? '' : /^(https?:)?\//.test(m.url) ? m.url : mediaUrl(m.url));
+export const fmtDur = (s) => { const v = Math.max(0, Math.round(s || 0)); return Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0'); };
+
 export async function snapshotFile(f) {
   if (!f || typeof f.arrayBuffer !== 'function') return f;
   const buf = await f.arrayBuffer();

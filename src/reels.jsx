@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { fmt, haptic, isOn, mediaUrl, onKeys, postFilter } from './lib.js';
 import { Avatar, HeartBurst, Icon, RichText, Vid, useInView, useTaps } from './ui.jsx';
+import { useMusic } from './player.jsx';
 
 function ReelItem({ post, live }) {
   const app = useApp();
@@ -19,6 +20,7 @@ function ReelItem({ post, live }) {
   const liked = isOn(post.likes, app.me.id);
   const saved = !!app.saved[post.id];
   const playing = live && inView && !hold;
+  useMusic(post.music, playing, 'reel:' + post.id);
   const tap = useTaps(() => {
     const next = !app.sound;
     app.setSound(next);
@@ -34,7 +36,7 @@ function ReelItem({ post, live }) {
   return (
     <section className="reel" ref={ref}>
       <div style={{ position: 'absolute', inset: 0 }} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onClick={click} onContextMenu={(e) => e.preventDefault()}>
-        <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={postFilter(post)} playing={playing} onProgress={setProg} onWatched={() => app.viewPost(post)} />
+        <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={postFilter(post)} playing={playing} onProgress={setProg} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
       </div>
       <div className="shade-top" />
       <div className="shade" />
@@ -63,7 +65,11 @@ function ReelItem({ post, live }) {
           </div>
         ) : null}
         {post.views ? <div className="views"><Icon n="play" size={12} fill />{fmt(post.views)} görüntülenme</div> : null}
-        <div className="audio"><Icon n="music" size={14} /><span className="track"><span>{app.nameOf(post.author)} · Orijinal ses</span><span>{app.nameOf(post.author)} · Orijinal ses</span></span></div>
+        {post.music ? (
+          <button className="audio" onClick={(e) => { e.stopPropagation(); app.openMusic(post.music.id); }} aria-label={'Müzik: ' + post.music.title}>
+            <Icon n="music" size={14} /><span className="track"><span>{post.music.title} · {post.music.artist}</span><span>{post.music.title} · {post.music.artist}</span></span>
+          </button>
+        ) : <div className="audio"><Icon n="music" size={14} /><span className="track"><span>{app.nameOf(post.author)} · Orijinal ses</span><span>{app.nameOf(post.author)} · Orijinal ses</span></span></div>}
       </div>
       <div className="vprog"><b style={{ width: prog * 100 + '%' }} /></div>
     </section>

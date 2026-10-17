@@ -4,10 +4,12 @@ import { Ctx, useApp } from './ctx.js';
 import {
   CONFIG, getClient, iso, rowComment, rowMessage, rowNotification, rowPost, rowProfile, rowStory, rowThread, toMs, uuid, errText, errCodeOf, functionError,
 } from './backend.js';
-import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo } from './lib.js';
+import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo, snapshotFile } from './lib.js';
 import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
 import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
 import { AdminScreen } from './admin.jsx';
+import { MusicScreen } from './music.jsx';
+import { stopMusic } from './player.jsx';
 import { HomeScreen, CommentsSheet, LikesSheet, SendSheet, PostScreen, PeekModal } from './feed.jsx';
 import { ReelsScreen } from './reels.jsx';
 import { StoryViewer } from './stories.jsx';
@@ -705,9 +707,9 @@ function App() {
     try {
       if (o.mode === 'story' && o.textStory) {
         const id = uuid();
-        const { error } = await sb.from('stories').insert({ id, author: me.id, text_story: o.textStory, close_friends: !!o.closeFriends, mentions: o.mentions || [] });
+        const { error } = await sb.from('stories').insert({ id, author: me.id, text_story: o.textStory, close_friends: !!o.closeFriends, mentions: o.mentions || [], music: o.music || null });
         if (error) throw error;
-        setStories((m) => ({ ...m, [id]: { id, author: me.id, media: null, text: o.textStory, filter: 'none', adjust: null, overlay: null, sharedPost: null, mentions: [], closeFriends: !!o.closeFriends, at: Date.now(), views: {}, likes: {} } }));
+        setStories((m) => ({ ...m, [id]: { id, author: me.id, media: null, text: o.textStory, filter: 'none', adjust: null, overlay: null, sharedPost: null, mentions: [], closeFriends: !!o.closeFriends, at: Date.now(), views: {}, likes: {}, music: o.music || null } }));
         onProgress(1);
         toast(o.closeFriends ? 'Yakın Arkadaşlar’la paylaşıldı' : 'Hikayen paylaşıldı');
         return true;
@@ -743,14 +745,14 @@ function App() {
       }
       const id = uuid();
       if (o.mode === 'story') {
-        const row = { id, author: me.id, media: media[0], filter: o.filter || 'none', adjust: o.adjust || null, overlay: o.overlay || null, close_friends: !!o.closeFriends, mentions: o.mentions || [] };
+        const row = { id, author: me.id, media: media[0], filter: o.filter || 'none', adjust: o.adjust || null, overlay: o.overlay || null, close_friends: !!o.closeFriends, mentions: o.mentions || [], music: o.music || null };
         const { error } = await sb.from('stories').insert(row);
         if (error) throw error;
         setStories((m) => ({ ...m, [id]: rowStory({ ...row, created_at: iso(), text_story: null }) }));
       } else {
         const row = {
           id, author: me.id, kind: o.mode, media, caption: o.caption || '', location: o.location || '', filter: o.filter || 'none', adjust: o.adjust || null,
-          hide_likes: !!o.hideLikes, comments_off: !!o.noComments, tagged: o.tagged || [],
+          hide_likes: !!o.hideLikes, comments_off: !!o.noComments, tagged: o.tagged || [], music: o.music || null,
         };
         const { error } = await sb.from('posts').insert(row);
         if (error) throw error;
@@ -1009,6 +1011,7 @@ function App() {
     return true;
   };
   const logout = async () => {
+    stopMusic();
     try { if (presence.current && presence.current.untrack) await presence.current.untrack(); } catch (e) { /* yok say */ }
     await sb.auth.signOut();
   };
@@ -1064,6 +1067,20 @@ function App() {
       if (ok) patchBase(uid, (p) => ({ ...p, verified: !!v }));
       return ok;
     },
+    addTrack: async (file, meta) => {
+      const ext = ((file.name.match(/\.([a-z0-9]+)$/i) || [])[1] || 'mp3').toLowerCase();
+      const duration = await new Promise((res) => {
+        const a = new Audio(); const u = URL.createObjectURL(file);
+        const done = (d) => { URL.revokeObjectURL(u); res(d); };
+        a.preload = 'metadata'; a.onloadedmetadata = () => done(a.duration); a.onerror = () => done(0); a.src = u;
+        setTimeout(() => done(0), 8000);
+      });
+      if (!duration || !isFinite(duration)) { toast('Bu müzik dosyası okunamadı.'); return null; }
+      let path;
+      try { path = await upload(await snapshotFile(file), 'music', ext, file.type || 'audio/mpeg'); } catch (e) { toast(errText(e, 'Müzik yüklenemedi.')); return null; }
+      return adminRpc('admin_add_track', { p_title: meta.title, p_artist: meta.artist || '', p_genre: meta.genre || '', p_url: path, p_duration: Math.round(duration * 10) / 10 }, 'Müzik kütüphaneye eklendi');
+    },
+    setTrackActive: (id, v) => adminRpc('admin_set_track_active', { tid: id, v }, v ? 'Müzik kütüphanede görünüyor' : 'Müzik gizlendi'),
     setRank: async (w) => {
       const data = await adminRpc('admin_set_rank', { v: w }, 'Algoritma ayarları kaydedildi');
       if (data) { setSettings((s) => ({ ...s, rank: data })); scoreCache.current.epoch = -1; setRankEpoch((e) => e + 1); }
@@ -1137,6 +1154,7 @@ function App() {
   const openLikes = (ids, title) => setPanel({ type: 'likes', ids, title: title || 'Beğenenler', k: rid() });
   const openSend = (post) => setPanel({ type: 'send', post, k: rid() });
   const openCreate = (mode, extra) => push({ type: 'create', mode: mode || 'post', ...(extra || {}) });
+  const openMusic = (id) => { if (id) { setPanel(null); push({ type: 'music', id }); } };
   const openTag = (tag) => { setPanel(null); setStoryView(null); push({ type: 'tag', tag: tag.replace(/^#/, '') }); };
   const openThread = (tid) => { setPanel(null); setStoryView(null); push({ type: 'chat', tid }); };
   const openChatWith = async (uid) => {
@@ -1199,7 +1217,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    viewPost, rankList, isAdmin, admin, settings, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, rankList, isAdmin, admin, settings, openMusic, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,
@@ -1232,11 +1250,12 @@ function App() {
     else if (o.type === 'edit') body = <EditProfileScreen />;
     else if (o.type === 'settings') body = <SettingsScreen />;
     else if (o.type === 'admin') body = <AdminScreen />;
+    else if (o.type === 'music') body = <MusicScreen id={o.id} />;
     else if (o.type === 'account') body = <AccountScreen />;
     else if (o.type === 'plist') body = <PeopleListScreen kind={o.kind} />;
     else if (o.type === 'grid') body = <GridScreen kind={o.kind} title={o.title} />;
     else if (o.type === 'tag') body = <TagScreen tag={o.tag} />;
-    else if (o.type === 'create') body = <CreateFlow mode={o.mode} onDone={(go) => { popTo(i); if (go) goTab(go); }} />;
+    else if (o.type === 'create') body = <CreateFlow mode={o.mode} music={o.music} onDone={(go) => { popTo(i); if (go) goTab(go); }} />;
     const full = !!FULLSCREEN[o.type];
     const fullIdx = stack.findIndex((x) => FULLSCREEN[x.type]);
     const above = full || (fullIdx >= 0 && i > fullIdx);

@@ -224,23 +224,24 @@ export function RichText({ text }) {
   );
 }
 
-export function Vid({ src, poster, filter, playing, className, loop, onEnded, onMeta, onProgress, onWatched, vref }) {
+export function Vid({ src, poster, filter, playing, className, loop, onEnded, onMeta, onProgress, onWatched, vref, forceMute }) {
   const app = useApp();
   const ref = useRef(null);
   const watched = useRef(false);
   useEffect(() => { watched.current = false; }, [src]);
-  useEffect(() => { if (ref.current) ref.current.muted = !app.sound; }, [app.sound]);
+  const muted = forceMute || !app.sound;
+  useEffect(() => { if (ref.current) ref.current.muted = muted; }, [muted]);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
     if (playing) {
-      v.muted = !app.sound;
+      v.muted = muted;
       const p = v.play();
       if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
     } else v.pause();
   }, [playing, src]);
   return (
-    <video ref={(el) => { ref.current = el; if (vref) vref.current = el; }} src={src} poster={poster || undefined} muted={!app.sound} playsInline
+    <video ref={(el) => { ref.current = el; if (vref) vref.current = el; }} src={src} poster={poster || undefined} muted={muted} playsInline
       loop={loop !== false} preload="metadata" className={className || 'fill'} style={filter ? { filter } : undefined}
       onEnded={onEnded} onLoadedMetadata={onMeta} disablePictureInPicture
       onTimeUpdate={onProgress || onWatched ? (e) => {

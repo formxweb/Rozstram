@@ -1,0 +1,98 @@
+[
+ {
+  "id": "yaz-aksami",
+  "title": "Yaz Akşamı",
+  "artist": "Rozstram Müzik",
+  "genre": "Pop",
+  "mood": "Neşeli",
+  "duration": 38.12
+ },
+ {
+  "id": "kahve-molasi",
+  "title": "Kahve Molası",
+  "artist": "Rozstram Müzik",
+  "genre": "Lo-fi",
+  "mood": "Sakin",
+  "duration": 36.32
+ },
+ {
+  "id": "neon-sehir",
+  "title": "Neon Şehir",
+  "artist": "Rozstram Müzik",
+  "genre": "Retro",
+  "mood": "Gece",
+  "duration": 39.6
+ },
+ {
+  "id": "ritim-34",
+  "title": "Ritim 34",
+  "artist": "Rozstram Müzik",
+  "genre": "Elektronik",
+  "mood": "Enerjik",
+  "duration": 32.17
+ },
+ {
+  "id": "sahil-yolu",
+  "title": "Sahil Yolu",
+  "artist": "Rozstram Müzik",
+  "genre": "Akustik",
+  "mood": "Huzurlu",
+  "duration": 41.2
+ },
+ {
+  "id": "gece-yuruyusu",
+  "title": "Gece Yürüyüşü",
+  "artist": "Rozstram Müzik",
+  "genre": "Hip-hop",
+  "mood": "Havalı",
+  "duration": 44.84
+ },
+ {
+  "id": "hicaz-esintisi",
+  "title": "Hicaz Esintisi",
+  "artist": "Rozstram Müzik",
+  "genre": "Oryantal",
+  "mood": "Gizemli",
+  "duration": 41.2
+ },
+ {
+  "id": "gun-dogumu",
+  "title": "Gün Doğumu",
+  "artist": "Rozstram Müzik",
+  "genre": "Sinematik",
+  "mood": "Duygusal",
+  "duration": 40.39
+ },
+ {
+  "id": "kalp-atisi",
+  "title": "Kalp Atışı",
+  "artist": "Rozstram Müzik",
+  "genre": "Romantik",
+  "mood": "Romantik",
+  "duration": 42.5
+ },
+ {
+  "id": "enerji",
+  "title": "Enerji",
+  "artist": "Rozstram Müzik",
+  "genre": "Pop Rock",
+  "mood": "Coşkulu",
+  "duration": 31.2
+ },
+ {
+  "id": "yildiz-tozu",
+  "title": "Yıldız Tozu",
+  "artist": "Rozstram Müzik",
+  "genre": "Chill",
+  "mood": "Rüya gibi",
+  "duration": 36.11
+ },
+ {
+  "id": "eski-kaset",
+  "title": "Eski Kaset",
+  "artist": "Rozstram Müzik",
+  "genre": "Funk",
+  "mood": "Eğlenceli",
+  "duration": 35.49
+ }
+]

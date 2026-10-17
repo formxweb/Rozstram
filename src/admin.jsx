@@ -4,8 +4,9 @@ import { useApp } from './ctx.js';
 import { ago, fmt, mediaUrl } from './lib.js';
 import { RANK_DEFAULTS, rankWeights } from './rank.js';
 import { Avatar, Empty, Icon, Spinner, TopBar, Verified } from './ui.jsx';
+import { AdminMusic } from './music.jsx';
 
-const TABS = [['genel', 'Genel'], ['algoritma', 'Algoritma'], ['sikayet', 'Şikayetler'], ['one', 'Öne çıkanlar'], ['tik', 'Mavi tik']];
+const TABS = [['genel', 'Genel'], ['algoritma', 'Algoritma'], ['sikayet', 'Şikayetler'], ['one', 'Öne çıkanlar'], ['muzik', 'Müzik'], ['tik', 'Mavi tik']];
 
 const SLIDERS = [
   ['video', 'Video önceliği', 'Reels ve videolar akışta ne kadar öne çıksın.'],
@@ -196,6 +197,7 @@ export function AdminScreen() {
         {tab === 'algoritma' ? <Algorithm /> : null}
         {tab === 'sikayet' ? <Reports onChange={load} /> : null}
         {tab === 'one' ? <Boosted data={data} reload={load} /> : null}
+        {tab === 'muzik' ? <AdminMusic /> : null}
         {tab === 'tik' ? <VerifiedTab /> : null}
       </div>
     </Fragment>

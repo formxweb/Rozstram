@@ -30,6 +30,9 @@ jsname, cssname = 'app-' + h(js) + '.js', 'app-' + h(css) + '.css'
 if os.path.exists(OUT): shutil.rmtree(OUT)
 os.makedirs(os.path.join(OUT, 'assets'))
 os.makedirs(os.path.join(OUT, 'icons'))
+# özgün müzik kütüphanesi (tools/music/generate.py ile üretildi)
+if os.path.isdir(os.path.join(ROOT, 'music')):
+    shutil.copytree(os.path.join(ROOT, 'music'), os.path.join(OUT, 'music'), ignore=shutil.ignore_patterns('*.json'))
 open(os.path.join(OUT, 'assets', jsname), 'w', encoding='utf-8').write(js)
 open(os.path.join(OUT, 'assets', cssname), 'w', encoding='utf-8').write(css)
 

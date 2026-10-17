@@ -972,6 +972,45 @@ begin
 end $$;
 
 -- =====================================================================
+-- 5c) MÜZİK KÜTÜPHANESİ
+-- =====================================================================
+create table if not exists public.music_tracks (
+  id         uuid primary key default gen_random_uuid(),
+  slug       text unique,
+  title      text not null check (char_length(btrim(title)) between 1 and 80),
+  artist     text not null default '' check (char_length(artist) <= 80),
+  genre      text not null default '' check (char_length(genre) <= 40),
+  mood       text not null default '' check (char_length(mood) <= 40),
+  url        text not null check (char_length(url) <= 500),
+  duration   numeric not null check (duration > 0 and duration <= 900),
+  active     boolean not null default true,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.posts add column if not exists music jsonb check (music is null or (jsonb_typeof(music) = 'object' and char_length(music::text) <= 1000));
+alter table public.stories add column if not exists music jsonb check (music is null or (jsonb_typeof(music) = 'object' and char_length(music::text) <= 1000));
+
+create or replace function public.admin_add_track(p_title text, p_artist text, p_genre text, p_url text, p_duration numeric) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare tid uuid;
+begin
+  perform public.admin_check();
+  if coalesce(p_url, '') !~ ('^' || auth.uid()::text || '/music/') then raise exception 'bad_url'; end if;
+  insert into public.music_tracks (title, artist, genre, url, duration, created_by)
+  values (left(btrim(p_title), 80), left(btrim(coalesce(p_artist, '')), 80), left(btrim(coalesce(p_genre, '')), 40), p_url, p_duration, auth.uid())
+  returning id into tid;
+  return tid;
+end $$;
+
+create or replace function public.admin_set_track_active(tid uuid, v boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.music_tracks set active = coalesce(v, false) where id = tid;
+end $$;
+
+-- =====================================================================
 -- 6) VERİ OKUMA (tek seferde açılış verisi)
 -- =====================================================================
 
@@ -983,7 +1022,7 @@ language sql stable as $$
     'pinned', p.pinned, 'archived', p.archived, 'at', public.ms(p.created_at), 'edited', case when p.edited_at is null then null else public.ms(p.edited_at) end,
     'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb),
     'views', public.view_count(p.id),
-    'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id)
+    'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id), 'music', p.music
   );
 $$;
 
@@ -999,7 +1038,7 @@ create or replace function public.story_json(s public.stories) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
     'id', s.id, 'author', s.author, 'media', s.media, 'text', s.text_story, 'filter', s.filter, 'adjust', s.adjust, 'overlay', s.overlay,
-    'sharedPost', s.shared_post, 'mentions', to_jsonb(s.mentions), 'closeFriends', s.close_friends, 'at', public.ms(s.created_at),
+    'sharedPost', s.shared_post, 'mentions', to_jsonb(s.mentions), 'closeFriends', s.close_friends, 'at', public.ms(s.created_at), 'music', s.music,
     'views', coalesce((select jsonb_object_agg(v.viewer, public.ms(v.created_at)) from public.story_views v where v.story_id = s.id), '{}'::jsonb),
     'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.story_likes l where l.story_id = s.id), '{}'::jsonb)
   );
@@ -1142,6 +1181,9 @@ alter table public.app_admins        enable row level security;
 alter table public.app_settings      enable row level security;
 alter table public.post_boosts       enable row level security;
 alter table public.post_removals     enable row level security;
+alter table public.music_tracks      enable row level security;
+drop policy if exists music_select on public.music_tracks;
+create policy music_select on public.music_tracks for select to authenticated using (active or public.is_admin());
 drop policy if exists app_settings_select on public.app_settings;
 create policy app_settings_select on public.app_settings for select to authenticated using (true);
 
@@ -1328,6 +1370,7 @@ revoke select, update, delete on public.reports from authenticated;
 revoke all on public.post_views from authenticated;
 revoke all on public.app_admins, public.post_boosts, public.post_removals from authenticated;
 revoke insert, update, delete on public.app_settings from authenticated;
+revoke insert, update, delete on public.music_tracks from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1343,6 +1386,7 @@ grant execute on function
   public.is_admin(), public.boost_of(uuid), public.post_removed(uuid), public.admin_check(), public.admin_overview(), public.admin_reports(),
   public.admin_resolve_report(bigint), public.admin_remove_post(uuid, text), public.admin_restore_post(uuid),
   public.admin_boost_post(uuid, numeric, int), public.admin_set_rank(jsonb), public.admin_set_verified(uuid, boolean),
+  public.admin_add_track(text, text, text, text, numeric), public.admin_set_track_active(uuid, boolean),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),
@@ -1412,3 +1456,19 @@ alter function public.msg_preview(public.messages) set search_path = public;
 
 -- algoritma ayarı satırı (boş = varsayılan ağırlıklar)
 insert into public.app_settings (key, value) values ('rank', '{}'::jsonb) on conflict (key) do nothing;
+
+-- uygulamanın özgün müzik kütüphanesi (dosyalar sitede /music/ altında)
+insert into public.music_tracks (slug, title, artist, genre, mood, url, duration) values
+  ('yaz-aksami', 'Yaz Akşamı', 'Rozstram Müzik', 'Pop', 'Neşeli', '/music/yaz-aksami.mp3', 38.12),
+  ('kahve-molasi', 'Kahve Molası', 'Rozstram Müzik', 'Lo-fi', 'Sakin', '/music/kahve-molasi.mp3', 36.32),
+  ('neon-sehir', 'Neon Şehir', 'Rozstram Müzik', 'Retro', 'Gece', '/music/neon-sehir.mp3', 39.6),
+  ('ritim-34', 'Ritim 34', 'Rozstram Müzik', 'Elektronik', 'Enerjik', '/music/ritim-34.mp3', 32.17),
+  ('sahil-yolu', 'Sahil Yolu', 'Rozstram Müzik', 'Akustik', 'Huzurlu', '/music/sahil-yolu.mp3', 41.2),
+  ('gece-yuruyusu', 'Gece Yürüyüşü', 'Rozstram Müzik', 'Hip-hop', 'Havalı', '/music/gece-yuruyusu.mp3', 44.84),
+  ('hicaz-esintisi', 'Hicaz Esintisi', 'Rozstram Müzik', 'Oryantal', 'Gizemli', '/music/hicaz-esintisi.mp3', 41.2),
+  ('gun-dogumu', 'Gün Doğumu', 'Rozstram Müzik', 'Sinematik', 'Duygusal', '/music/gun-dogumu.mp3', 40.39),
+  ('kalp-atisi', 'Kalp Atışı', 'Rozstram Müzik', 'Romantik', 'Romantik', '/music/kalp-atisi.mp3', 42.5),
+  ('enerji', 'Enerji', 'Rozstram Müzik', 'Pop Rock', 'Coşkulu', '/music/enerji.mp3', 31.2),
+  ('yildiz-tozu', 'Yıldız Tozu', 'Rozstram Müzik', 'Chill', 'Rüya gibi', '/music/yildiz-tozu.mp3', 36.11),
+  ('eski-kaset', 'Eski Kaset', 'Rozstram Müzik', 'Funk', 'Eğlenceli', '/music/eski-kaset.mp3', 35.49)
+on conflict (slug) do update set title = excluded.title, artist = excluded.artist, genre = excluded.genre, mood = excluded.mood, url = excluded.url, duration = excluded.duration;

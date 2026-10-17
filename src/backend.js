@@ -71,6 +71,7 @@ export function rowPost(r, prev) {
     views: (prev && prev.views) || 0,
     boost: (prev && prev.boost) || 0,
     removed: !!(prev && prev.removed),
+    music: r.music || null,
   };
 }
 
@@ -82,7 +83,7 @@ export function rowStory(r, prev) {
   return {
     id: r.id, author: r.author, media: r.media || null, text: r.text_story || null, filter: r.filter || 'none', adjust: r.adjust || null,
     overlay: r.overlay || null, sharedPost: r.shared_post || null, mentions: r.mentions || [], closeFriends: !!r.close_friends,
-    at: toMs(r.created_at), views: (prev && prev.views) || {}, likes: (prev && prev.likes) || {},
+    at: toMs(r.created_at), views: (prev && prev.views) || {}, likes: (prev && prev.likes) || {}, music: r.music || null,
   };
 }
 

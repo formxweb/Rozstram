@@ -300,6 +300,26 @@ select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-00
 select t.ok((select verified from public.profiles where id = auth.uid()), 'yönetici mavi tik verdi');
 select t.as_user('00000000-0000-0000-0000-00000000000a');
 
+-- ------------------------------------------------------------------ müzik
+\echo '== müzik'
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((select count(*) from public.music_tracks) = 12, 'hazır kütüphanede 12 müzik');
+select t.err($q$insert into public.music_tracks (title, url, duration) values ('x', '/x.mp3', 10)$q$, 'permission denied', 'kullanıcı müzik ekleyemez');
+select t.err($q$select public.admin_add_track('x', '', '', 'd/music/x.mp3', 30)$q$, 'not_allowed', 'yönetici olmayan müzik ekleyemez');
+insert into public.posts (id, kind, media, music) values ('10000000-0000-0000-0000-0000000000f9', 'reel', '[{"id":"d/p/v.mp4","type":"video"}]',
+  jsonb_build_object('id', (select id from public.music_tracks where slug = 'neon-sehir'), 'title', 'Neon Şehir', 'url', '/music/neon-sehir.mp3', 'start', 5, 'dur', 15));
+select t.ok((public.get_posts(array['10000000-0000-0000-0000-0000000000f9'::uuid]) -> 'posts' -> 0 -> 'music' ->> 'title') = 'Neon Şehir', 'gönderide müzik kayıtlı');
+select t.err($q$insert into public.posts (media, music) values ('[{"id":"d/p/a.jpg","type":"image"}]', '"metin"')$q$, 'check', 'müzik alanı nesne olmalı');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.err($q$select public.admin_add_track('Şarkı', 'Ben', 'Pop', 'baskasi/music/x.mp3', 30)$q$, 'bad_url', 'yönetici sadece kendi yüklediği dosyayı ekler');
+select public.admin_add_track('Benim Şarkım', 'Bob', 'Pop', '00000000-0000-0000-0000-00000000000b/music/a.mp3', 42.5) as new_track \gset
+select t.ok((select count(*) from public.music_tracks) = 13, 'yönetici müzik ekledi');
+select public.admin_set_track_active(:'new_track', false);
+select t.ok((select count(*) from public.music_tracks) = 13, 'yönetici gizli müziği görür');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((select count(*) from public.music_tracks) = 12, 'gizlenen müzik kullanıcıya görünmez');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
 reset role;

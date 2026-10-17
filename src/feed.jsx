@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { COMMENT_EMOJIS, ago, fmt, haptic, isOn, mediaUrl, onKeys, postFilter, shareLink } from './lib.js';
+import { MusicTag, useMusic } from './player.jsx';
 import {
   Avatar, AvatarStack, Empty, FollowButton, HeartBurst, Icon, Mark, PersonRow, RichText, Sheet, SkeletonPost, TopBar, UName, Vid,
   useInView, useLongPress, useTaps,
@@ -189,7 +190,9 @@ function PostMedia({ post, live, onDouble, tagged }) {
   const aspect = (media[0] && media[0].aspect) || 1;
   const filter = postFilter(post);
   const cur = media[idx];
-  const tap = useTaps(cur && cur.type === 'video' ? () => app.setSound(!app.sound) : null, () => { setBurst((b) => b + 1); haptic(12); onDouble(); });
+  const hasSound = !!(post.music || (cur && cur.type === 'video'));
+  useMusic(post.music, live && inView, 'post:' + post.id);
+  const tap = useTaps(hasSound ? () => app.setSound(!app.sound) : null, () => { setBurst((b) => b + 1); haptic(12); onDouble(); });
   const showCounter = () => { setCounterOn(true); clearTimeout(counterTimer.current); counterTimer.current = setTimeout(() => setCounterOn(false), 2600); };
   useEffect(() => { showCounter(); return () => clearTimeout(counterTimer.current); }, []);
   const onScroll = () => {
@@ -205,20 +208,18 @@ function PostMedia({ post, live, onDouble, tagged }) {
           {media.map((m, i) => (
             <div className="slide" key={i}>
               {m.type === 'video'
-                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx} onProgress={i === idx ? setProg : undefined} onWatched={() => app.viewPost(post)} />
+                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx} onProgress={i === idx ? setProg : undefined} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
                 : <img className="fill" src={mediaUrl(m.id)} alt={post.caption || 'Gönderi'} loading="lazy" decoding="async" style={filter ? { filter } : undefined} draggable="false" />}
             </div>
           ))}
         </div>
         {media.length > 1 ? <div className="counter" style={{ opacity: counterOn ? 1 : 0 }}>{idx + 1}/{media.length}</div> : null}
-        {cur && cur.type === 'video' ? (
-          <Fragment>
-            <button className="mute-btn" aria-label={app.sound ? 'Sesi kapat' : 'Sesi aç'} onClick={(e) => { e.stopPropagation(); app.setSound(!app.sound); }}>
-              <Icon n={app.sound ? 'volOn' : 'volOff'} size={16} />
-            </button>
-            <div className="vbar"><b style={{ width: prog * 100 + '%' }} /></div>
-          </Fragment>
+        {hasSound ? (
+          <button className="mute-btn" aria-label={app.sound ? 'Sesi kapat' : 'Sesi aç'} onClick={(e) => { e.stopPropagation(); app.setSound(!app.sound); }}>
+            <Icon n={app.sound ? 'volOn' : 'volOff'} size={16} />
+          </button>
         ) : null}
+        {cur && cur.type === 'video' ? <div className="vbar"><b style={{ width: prog * 100 + '%' }} /></div> : null}
         <HeartBurst k={burst} />
         {tagged && tagged.length ? (
           <button className="tag-btn" aria-label="Etiketlenen kişiler" onClick={(e) => { e.stopPropagation(); app.openLikes(tagged, 'Bu gönderideki kişiler'); }}><Icon n="user" size={15} /></button>
@@ -260,7 +261,8 @@ export function PostCard({ post, live }) {
               <UName uid={post.author} />
               {showFollow ? <Fragment><span className="sub">•</span><button className="follow-link" onClick={() => app.setFollow(post.author, true)}>Takip et</button></Fragment> : null}
             </div>
-            {post.location ? <button className="loc" onClick={() => app.openTag(post.location.replace(/\s+/g, ''))}>{post.location}</button>
+            {post.music ? <MusicTag m={post.music} onClick={() => app.openMusic(post.music.id)} />
+              : post.location ? <button className="loc" onClick={() => app.openTag(post.location.replace(/\s+/g, ''))}>{post.location}</button>
               : post.kind === 'reel' ? <span className="loc"><Icon n="music" size={11} style={{ display: 'inline', verticalAlign: '-1px' }} /> Orijinal ses</span>
               : tagged.length ? <span className="sub">{tagged.length === 1 ? app.nameOf(tagged[0]) + ' ile' : app.nameOf(tagged[0]) + ' ve ' + (tagged.length - 1) + ' kişi ile'}</span>
               : author.displayName ? <span className="sub">{author.displayName}</span> : null}
@@ -379,7 +381,7 @@ export function PeekModal({ postId, onClose }) {
       <div className="peek-card" onClick={(e) => e.stopPropagation()}>
         <div className="hd"><Avatar uid={post.author} size={30} /><UName uid={post.author} onClick={() => { onClose(); app.openUser(post.author); }} /></div>
         <div className="media" style={{ aspectRatio: String(Math.max(0.8, m.aspect || 1)) }}>
-          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing onWatched={() => app.viewPost(post)} />
+          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
             : <img className="fill" src={mediaUrl(m.id)} alt="" style={filter ? { filter } : undefined} />}
         </div>
         <div className="ft">

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { QUICK_EMOJIS, STORY_BGS, ago, filterCss, haptic, isOn, mediaUrl, onKeys, postFilter } from './lib.js';
 import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Vid } from './ui.jsx';
+import { MusicTag, useMusic } from './player.jsx';
 
 export function StoryText({ t, small }) {
   if (!t) return null;
@@ -29,7 +30,7 @@ export function StoryMedia({ s, playing, onMeta, small }) {
           </div>
         </div>
       ) : s.media.type === 'video'
-        ? <Vid src={mediaUrl(s.media.id)} poster={s.media.thumb ? mediaUrl(s.media.thumb) : undefined} filter={f} playing={playing} loop={false} onMeta={onMeta} />
+        ? <Vid src={mediaUrl(s.media.id)} poster={s.media.thumb ? mediaUrl(s.media.thumb) : undefined} filter={f} playing={playing} loop={false} onMeta={onMeta} forceMute={!!s.music} />
         : <img src={mediaUrl(s.media.id)} alt="" style={f ? { filter: f } : undefined} draggable="false" />}
       {s.overlay && s.overlay.text ? (
         <div className="overlay-text" style={{ left: (s.overlay.x || 0.5) * 100 + '%', top: (s.overlay.y || 0.5) * 100 + '%', color: s.overlay.color || '#fff', fontSize: small ? 9 : undefined }}>{s.overlay.text}</div>
@@ -65,13 +66,14 @@ export function StoryViewer({ groups, index, highlight, archive, startAt, onClos
   const uid = group && group.uid;
   const isMe = uid === app.me.id;
   const stopped = paused || typing || viewers || closing;
+  useMusic(story && story.music, !!story && !stopped, 'story:' + (story ? story.id : ''));
 
   const close = () => { if (closing) return; setClosing(true); setTimeout(onClose, 200); };
   useEffect(() => { if (!story) close(); }, [!!story]);
   useEffect(() => {
     if (!story) return;
     app.markStorySeen(story);
-    setDur(story.media && story.media.type === 'video' && !story.sharedPost ? 0 : 5);
+    setDur(story.media && story.media.type === 'video' && !story.sharedPost ? 0 : story.music ? Math.min(15, Math.max(5, story.music.dur || 15)) : 5);
   }, [story && story.id]);
 
   const goGroup = (d) => {
@@ -175,6 +177,9 @@ export function StoryViewer({ groups, index, highlight, archive, startAt, onClos
               <small>{ago(story.at)}</small>
             </button>
             <div className="r">
+              {story.music || (story.media && story.media.type === 'video') ? (
+                <button onClick={() => app.setSound(!app.sound)} aria-label={app.sound ? 'Sesi kapat' : 'Sesi aç'}><Icon n={app.sound ? 'volOn' : 'volOff'} size={24} /></button>
+              ) : null}
               <button onClick={more} aria-label="Seçenekler"><Icon n="more" size={24} /></button>
               <button onClick={close} aria-label="Kapat"><Icon n="close" size={28} /></button>
             </div>
@@ -185,6 +190,7 @@ export function StoryViewer({ groups, index, highlight, archive, startAt, onClos
             <button onClick={prev}>Önceki</button><button onClick={next}>Sonraki</button>
           </span>
         </div>
+        {story.music && !hideUi ? <div className="story-music"><MusicTag m={story.music} dark onClick={() => { close(); app.openMusic(story.music.id); }} /></div> : null}
         {shared && !hideUi ? <button className="shared-go" onClick={() => { close(); app.openPost(shared.id); }}>Gönderiye git</button> : null}
         {typing && !reply && !isMe ? (
           <div className="quick-react" onPointerDown={(e) => e.preventDefault()}>

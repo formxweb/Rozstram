@@ -3,6 +3,8 @@ import { useApp } from './ctx.js';
 import { ADJUSTS, FILTERS, MAX_UPLOAD, STORY_BGS, STORY_FONTS, TEXT_COLORS, filterCss, haptic, snapshotFile } from './lib.js';
 import { Avatar, Empty, Icon, PersonRow, Sheet, Toggle, TopBar, Vid } from './ui.jsx';
 import { StoryText } from './stories.jsx';
+import { MusicPicker } from './music.jsx';
+import { MusicTag, pauseMusic, playMusic, stopMusic } from './player.jsx';
 
 const TITLES = { post: 'Yeni gönderi', reel: 'Yeni Reels', story: 'Hikayene ekle' };
 const ASPECTS = [{ id: '1', name: '1:1', v: 1 }, { id: '45', name: '4:5', v: 0.8 }, { id: 'o', name: 'Orijinal', v: null }];
@@ -26,7 +28,7 @@ function UploadOverlay({ progress, done }) {
   );
 }
 
-export function CreateFlow({ mode: initialMode, onDone }) {
+export function CreateFlow({ mode: initialMode, music: initialMusic, onDone }) {
   const app = useApp();
   const [mode, setMode] = useState(initialMode || 'post');
   const [step, setStep] = useState('pick');
@@ -51,6 +53,24 @@ export function CreateFlow({ mode: initialMode, onDone }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
   const [slide, setSlide] = useState(0);
+  const [music, setMusic] = useState(initialMusic || null);
+  const [musicOpen, setMusicOpen] = useState(false);
+  // seçilen müziği düzenlerken çal (seçici açıkken o kendi önizlemesini çalar)
+  useEffect(() => {
+    if (music && !musicOpen && step !== 'pick' && progress == null) playMusic('create:' + music.id + ':' + music.start, music);
+    else pauseMusic();
+  }, [music, musicOpen, step, progress]);
+  useEffect(() => () => stopMusic(), []);
+  const musicBtn = (cls) => (
+    <button className={cls || 'round'} onClick={() => setMusicOpen(true)} aria-label="Müzik ekle"><Icon n="music" size={cls ? 14 : 22} />{cls ? (music ? music.title : 'Müzik') : null}</button>
+  );
+  const musicSticker = music ? (
+    <div className="se-music">
+      <MusicTag m={music} dark onClick={() => setMusicOpen(true)} />
+      <button className="x" onClick={() => setMusic(null)} aria-label="Müziği kaldır"><Icon n="close" size={14} /></button>
+    </div>
+  ) : null;
+  const picker = musicOpen ? <MusicPicker value={music} onPick={setMusic} onClose={() => setMusicOpen(false)} /> : null;
   const fileRef = useRef(null);
   const stageRef = useRef(null);
   const dragRef = useRef(null);
@@ -88,7 +108,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
     const asp = ASPECTS.find((a) => a.id === aspect);
     const ok = await app.publish({
       mode, items, filter, adjust, caption: caption.trim(), location: location.trim(), hideLikes, noComments, aspect: asp ? asp.v : null,
-      overlay: overlay && overlay.text ? overlay : null, textStory: step === 'text' ? textStory : null, tagged, closeFriends: closeFriends === true,
+      overlay: overlay && overlay.text ? overlay : null, textStory: step === 'text' ? textStory : null, tagged, closeFriends: closeFriends === true, music,
     }, (p) => setProgress(p));
     if (ok) {
       setDone(true); haptic(20);
@@ -114,11 +134,13 @@ export function CreateFlow({ mode: initialMode, onDone }) {
             <div className="tools">
               <button className="round txt" onClick={() => setTextStory((t) => ({ ...t, font: STORY_FONTS[(STORY_FONTS.findIndex((f) => f.id === t.font) + 1) % STORY_FONTS.length].id }))} aria-label="Yazı tipi">Aa</button>
               <button className="round" onClick={() => setTextStory((t) => ({ ...t, bg: (t.bg + 1) % STORY_BGS.length }))} aria-label="Arka plan"><Icon n="palette" size={22} /></button>
+              {musicBtn()}
             </div>
           </div>
           <textarea id="story-text" className={'story-text f-' + textStory.font} autoFocus value={textStory.body} maxLength={220} placeholder="Bir şey yaz…"
             onChange={(e) => setTextStory((t) => ({ ...t, body: e.target.value }))}
             style={{ position: 'absolute', inset: '70px 20px 60px', background: 'none', border: 0, outline: 'none', resize: 'none', color: textStory.color, textAlign: 'center', paddingTop: '30%' }} />
+          {musicSticker}
           <div className="color-dots" style={{ position: 'absolute', left: 0, right: 0, bottom: 8 }}>
             {TEXT_COLORS.map((c) => <button key={c} className={textStory.color === c ? 'on' : ''} style={{ background: c }} onClick={() => setTextStory((t) => ({ ...t, color: c }))} aria-label={'Renk ' + c} />)}
           </div>
@@ -128,6 +150,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
           <button className="se-share cf" disabled={!textStory.body.trim()} onClick={() => share(true)}><span className="cf-dot"><Icon n="star" size={13} fill /></span>Yakın Arkadaşlar</button>
         </div>
         {progress != null ? <UploadOverlay progress={progress} done={done} /> : null}
+        {picker}
       </div>
     );
   }
@@ -145,7 +168,8 @@ export function CreateFlow({ mode: initialMode, onDone }) {
     return (
       <div className="se">
         <div className="se-stage" ref={stageRef}>
-          {first.type === 'video' ? <Vid src={first.url} filter={fcss} playing /> : <img src={first.url} alt="" style={fcss ? { filter: fcss } : undefined} />}
+          {first.type === 'video' ? <Vid src={first.url} filter={fcss} playing forceMute={!!music} /> : <img src={first.url} alt="" style={fcss ? { filter: fcss } : undefined} />}
+          {musicSticker}
           {overlay && overlay.text ? (
             <div className="overlay-text drag-text" style={{ left: overlay.x * 100 + '%', top: overlay.y * 100 + '%', color: overlay.color }}
               onPointerDown={onDragDown} onPointerMove={onDragMove} onPointerUp={onDragUp} onPointerCancel={onDragUp}
@@ -156,6 +180,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
             <div className="tools">
               <button className="round txt" onClick={() => { setDraftText(overlay ? overlay.text : ''); setTextColor(overlay ? overlay.color : '#ffffff'); setEditingText(true); }} aria-label="Yazı ekle">Aa</button>
               <button className="round" onClick={() => setFilter(FILTERS[(fIdx + 1) % FILTERS.length].id)} aria-label="Filtre"><Icon n="filter" size={22} /></button>
+              {musicBtn()}
             </div>
           </div>
           <span className="pill" style={{ position: 'absolute', left: '50%', bottom: 14, transform: 'translateX(-50%)' }} key={filter}>{FILTERS[fIdx].name}</span>
@@ -175,6 +200,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
         </div>
         {error ? <div className="toast">{error}</div> : null}
         {progress != null ? <UploadOverlay progress={progress} done={done} /> : null}
+        {picker}
       </div>
     );
   }
@@ -213,7 +239,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
               <div className="slides" onScroll={(e) => setSlide(Math.round(e.currentTarget.scrollLeft / Math.max(1, e.currentTarget.clientWidth)))}>
                 {items.map((it) => (
                   <div className="slide" key={it.url}>
-                    {it.type === 'video' ? <Vid src={it.url} filter={fcss} playing /> : <img className="fill" src={it.url} alt="" style={{ filter: fcss, objectFit: aspect === 'o' ? 'contain' : 'cover' }} />}
+                    {it.type === 'video' ? <Vid src={it.url} filter={fcss} playing forceMute={!!music} /> : <img className="fill" src={it.url} alt="" style={{ filter: fcss, objectFit: aspect === 'o' ? 'contain' : 'cover' }} />}
                   </div>
                 ))}
               </div>
@@ -221,6 +247,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
               <div className="preview-tools">
                 {mode === 'post' && first.type === 'image' ? ASPECTS.map((a) => <button key={a.id} className={'pill' + (aspect === a.id ? ' on' : '')} onClick={() => setAspect(a.id)}>{a.name}</button>) : null}
                 <button className="pill" onClick={pick}><Icon n="image" size={14} />Değiştir</button>
+                {musicBtn('pill' + (music ? ' on' : ''))}
               </div>
             </div>
             <div className="edit-tabs">
@@ -259,6 +286,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
             </div>
             <div className="sub" style={{ textAlign: 'right', paddingTop: 6 }}>{caption.length}/2200</div>
             <label className="opt-row" htmlFor="create-loc"><Icon n="pin" size={22} /><input id="create-loc" placeholder="Konum ekle" value={location} maxLength={80} onChange={(e) => setLocation(e.target.value)} /></label>
+            <button className="opt-row" id="create-music" onClick={() => setMusicOpen(true)}><Icon n="music" size={22} /><span className="grow"><span>{music ? music.title : 'Müzik ekle'}</span>{music ? <span className="sub">{music.artist}</span> : <span className="sub">Kütüphaneden bir müzik seç</span>}</span>{music ? <span className="text-btn" onClick={(e) => { e.stopPropagation(); setMusic(null); }}>Kaldır</span> : <Icon n="chevRight" size={18} />}</button>
             <button className="opt-row" onClick={() => setTagOpen(true)}><Icon n="user" size={22} /><span className="grow"><span>Kişileri etiketle</span>{tagged.length ? <span className="sub">{tagged.map((u) => '@' + app.nameOf(u)).join(', ')}</span> : null}</span><Icon n="chevRight" size={18} /></button>
             <div className="opt-row"><Icon n="eyeOff" size={22} /><span className="grow"><span>Beğeni sayısını gizle</span><span className="sub">Beğeni sayısını sadece sen görürsün.</span></span><Toggle id="opt-hide" on={hideLikes} onChange={setHideLikes} label="Beğeni sayısını gizle" /></div>
             <div className="opt-row"><Icon n="comment" size={22} /><span className="grow"><span>Yorumları kapat</span><span className="sub">Bu ayarı daha sonra gönderi menüsünden değiştirebilirsin.</span></span><Toggle id="opt-nocom" on={noComments} onChange={setNoComments} label="Yorumları kapat" /></div>
@@ -274,6 +302,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
       ) : null}
       {progress != null ? <UploadOverlay progress={progress} done={done} /> : null}
       {tagOpen ? <TagPeopleSheet value={tagged} onChange={setTagged} onClose={() => setTagOpen(false)} /> : null}
+      {picker}
     </Fragment>
   );
 }
