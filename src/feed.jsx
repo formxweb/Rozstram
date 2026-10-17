@@ -205,7 +205,7 @@ function PostMedia({ post, live, onDouble, tagged }) {
           {media.map((m, i) => (
             <div className="slide" key={i}>
               {m.type === 'video'
-                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx} onProgress={i === idx ? setProg : undefined} />
+                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx} onProgress={i === idx ? setProg : undefined} onWatched={() => app.viewPost(post)} />
                 : <img className="fill" src={mediaUrl(m.id)} alt={post.caption || 'Gönderi'} loading="lazy" decoding="async" style={filter ? { filter } : undefined} draggable="false" />}
             </div>
           ))}
@@ -284,6 +284,7 @@ export function PostCard({ post, live }) {
           </button>
         </div>
         <div className="meta">
+          {post.views && (post.media || []).some((x) => x.type === 'video') ? <div className="views-line"><b>{fmt(post.views)} görüntülenme</b></div> : null}
           {likes.length ? (
             <button className="likes-line" onClick={() => app.openLikes(likes)}>
               {friends.length ? <AvatarStack ids={friends} size={20} /> : null}
@@ -360,7 +361,7 @@ export function GridTile({ post, tall, reel, pinned }) {
         ? <img className="fill" src={mediaUrl(thumb)} alt="" loading="lazy" style={filter ? { filter } : undefined} draggable="false" />
         : m.type === 'video' ? <video className="fill" src={mediaUrl(m.id) + '#t=0.5'} muted playsInline preload="metadata" /> : null}
       {pinned ? <Icon n="thumb" size={18} className="badge-ico" fill /> : m.type === 'video' ? <Icon n="reels" size={20} className="badge-ico" /> : (post.media || []).length > 1 ? <Icon n="multi" size={20} className="badge-ico" /> : null}
-      {reel ? <span className="stat"><Icon n="play" size={13} fill />{fmt(onKeys(post.likes).length)}</span> : null}
+      {reel ? <span className="stat"><Icon n="play" size={13} fill />{fmt(post.views || 0)}</span> : null}
     </button>
   );
 }
@@ -377,7 +378,7 @@ export function PeekModal({ postId, onClose }) {
       <div className="peek-card" onClick={(e) => e.stopPropagation()}>
         <div className="hd"><Avatar uid={post.author} size={30} /><UName uid={post.author} onClick={() => { onClose(); app.openUser(post.author); }} /></div>
         <div className="media" style={{ aspectRatio: String(Math.max(0.8, m.aspect || 1)) }}>
-          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing />
+          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing onWatched={() => app.viewPost(post)} />
             : <img className="fill" src={mediaUrl(m.id)} alt="" style={filter ? { filter } : undefined} />}
         </div>
         <div className="ft">

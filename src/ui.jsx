@@ -224,9 +224,11 @@ export function RichText({ text }) {
   );
 }
 
-export function Vid({ src, poster, filter, playing, className, loop, onEnded, onMeta, onProgress, vref }) {
+export function Vid({ src, poster, filter, playing, className, loop, onEnded, onMeta, onProgress, onWatched, vref }) {
   const app = useApp();
   const ref = useRef(null);
+  const watched = useRef(false);
+  useEffect(() => { watched.current = false; }, [src]);
   useEffect(() => { if (ref.current) ref.current.muted = !app.sound; }, [app.sound]);
   useEffect(() => {
     const v = ref.current;
@@ -241,7 +243,11 @@ export function Vid({ src, poster, filter, playing, className, loop, onEnded, on
     <video ref={(el) => { ref.current = el; if (vref) vref.current = el; }} src={src} poster={poster || undefined} muted={!app.sound} playsInline
       loop={loop !== false} preload="metadata" className={className || 'fill'} style={filter ? { filter } : undefined}
       onEnded={onEnded} onLoadedMetadata={onMeta} disablePictureInPicture
-      onTimeUpdate={onProgress ? (e) => { const v = e.currentTarget; if (v.duration) onProgress(v.currentTime / v.duration); } : undefined} />
+      onTimeUpdate={onProgress || onWatched ? (e) => {
+        const v = e.currentTarget;
+        if (onProgress && v.duration) onProgress(v.currentTime / v.duration);
+        if (onWatched && !watched.current && v.duration && v.currentTime >= Math.min(2, v.duration / 2)) { watched.current = true; onWatched(); }
+      } : undefined} />
   );
 }
 

@@ -118,6 +118,14 @@ create table if not exists public.post_likes (
 );
 create index if not exists post_likes_user_idx on public.post_likes (user_id, created_at desc);
 
+-- Video görüntülenmeleri: kişi başına bir kez sayılır, sahibinin kendi izlemesi sayılmaz
+create table if not exists public.post_views (
+  post_id    uuid not null references public.posts (id) on delete cascade,
+  viewer     uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, viewer)
+);
+
 create table if not exists public.saves (
   user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
   post_id    uuid not null references public.posts (id) on delete cascade,
@@ -767,6 +775,28 @@ begin
 end $$;
 
 
+-- görüntülenme sayısı (kimin izlediği gizli kalır)
+create or replace function public.view_count(pid uuid) returns bigint
+language sql stable security definer set search_path = public as $$
+  select count(*) from public.post_views where post_id = pid;
+$$;
+
+-- video izlendi: görebildiği bir gönderiyse ve sahibi değilse bir kez sayılır.
+-- Yeni sayıldıysa true döner.
+create or replace function public.view_post(pid uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then return false; end if;
+  insert into public.post_views (post_id, viewer)
+  select p.id, auth.uid() from public.posts p
+  where p.id = pid and p.author <> auth.uid() and not p.archived and public.can_view(p.author)
+    and exists (select 1 from jsonb_array_elements(p.media) m where m ->> 'type' = 'video')
+  on conflict do nothing;
+  get diagnostics n = row_count;
+  return n > 0;
+end $$;
+
 -- yorum sabitleme (gönderi sahibi)
 create or replace function public.pin_comment(cid uuid, v boolean) returns void
 language plpgsql security definer set search_path = public as $$
@@ -788,7 +818,8 @@ language sql stable as $$
     'id', p.id, 'author', p.author, 'kind', p.kind, 'media', p.media, 'caption', p.caption, 'location', p.location,
     'filter', p.filter, 'adjust', p.adjust, 'tagged', to_jsonb(p.tagged), 'hideLikes', p.hide_likes, 'noComments', p.comments_off,
     'pinned', p.pinned, 'archived', p.archived, 'at', public.ms(p.created_at), 'edited', case when p.edited_at is null then null else public.ms(p.edited_at) end,
-    'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb)
+    'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb),
+    'views', public.view_count(p.id)
   );
 $$;
 
@@ -918,6 +949,7 @@ alter table public.mutes             enable row level security;
 alter table public.close_friends     enable row level security;
 alter table public.posts             enable row level security;
 alter table public.post_likes        enable row level security;
+alter table public.post_views        enable row level security;
 alter table public.saves             enable row level security;
 alter table public.hidden_posts      enable row level security;
 alter table public.comments          enable row level security;
@@ -1110,6 +1142,7 @@ grant update (read_at) on public.notifications to authenticated;
 revoke update on public.comments from authenticated;
 revoke update on public.stories from authenticated;
 revoke select, update, delete on public.reports from authenticated;
+revoke all on public.post_views from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1121,7 +1154,7 @@ grant execute on function
   public.story_in_highlight(uuid, uuid), public.is_member(uuid), public.dm_blocked(uuid),
   public.change_username(text), public.update_contact(text, text),
   public.start_dm(uuid), public.create_group(uuid[], text), public.add_group_members(uuid, uuid[]), public.rename_group(uuid, text),
-  public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean),
+  public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean), public.view_post(uuid), public.view_count(uuid),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),

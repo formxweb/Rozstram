@@ -68,6 +68,7 @@ export function rowPost(r, prev) {
     filter: r.filter || 'none', adjust: r.adjust || null, tagged: r.tagged || [], hideLikes: !!r.hide_likes, noComments: !!r.comments_off,
     pinned: !!r.pinned, archived: !!r.archived, at: toMs(r.created_at), edited: r.edited_at ? toMs(r.edited_at) : null,
     likes: (prev && prev.likes) || {},
+    views: (prev && prev.views) || 0,
   };
 }
 

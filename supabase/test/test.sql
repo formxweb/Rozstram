@@ -238,6 +238,29 @@ select t.err($q$select public.start_dm('00000000-0000-0000-0000-00000000000d')$q
 insert into storage.objects (bucket_id, name) values ('media', auth.uid()::text || '/foto.jpg');
 select t.err($q$insert into storage.objects (bucket_id, name) values ('media', '00000000-0000-0000-0000-00000000000b/foto.jpg')$q$, 'row-level security', 'başkasının klasörüne dosya yüklenemez');
 
+-- ------------------------------------------------------------------ video görüntülenme
+\echo '== video görüntülenme'
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+update public.profiles set is_private = false where id = auth.uid();
+insert into public.posts (id, kind, media) values ('10000000-0000-0000-0000-0000000000f1', 'reel', '[{"id":"b/p/v.mp4","type":"video"}]');
+insert into public.posts (id, media) values ('10000000-0000-0000-0000-0000000000f2', '[{"id":"b/p/f.jpg","type":"image"}]');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f1') = false, 'sahibinin kendi izlemesi sayılmaz');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f1') = true, 'ilk izleme sayıldı');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f1') = false, 'aynı kişinin tekrar izlemesi bir daha sayılmaz');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f2') = false, 'fotoğraf gönderisi izlenme saymaz');
+select t.ok((public.get_posts(array['10000000-0000-0000-0000-0000000000f1'::uuid]) -> 'posts' -> 0 ->> 'views')::int = 1, 'görüntülenme sayısı 1');
+select t.err($q$select count(*) from public.post_views$q$, 'permission denied', 'kimin izlediği başkalarına görünmez');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+update public.profiles set is_private = true where id = auth.uid();
+insert into public.posts (id, kind, media) values ('10000000-0000-0000-0000-0000000000f3', 'reel', '[{"id":"c/p/v.mp4","type":"video"}]');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.ok(not exists (select 1 from public.follows where follower = auth.uid() and following = '00000000-0000-0000-0000-00000000000c'), 'alice carol''u takip etmiyor');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f3') = false, 'göremediği gizli hesabın videosu sayılmaz');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f3') = true, 'takipçi gizli hesabın videosunu izleyince sayılır');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
 reset role;

@@ -276,6 +276,21 @@ async function signup(page, { via, contact, name, pw, username }) {
   await shot(A, 'reels');
   ok('Reels videosu yüklendi');
 
+  /* ---------------------------------------------------------- görüntülenme */
+  await A.waitForTimeout(3000);
+  if (Number(await sql(`select count(*) from public.post_views`)) !== 0) throw new Error('sahibinin izlemesi sayıldı');
+  await B.locator('nav button[aria-label="Reels"]').click();
+  await B.waitForSelector('.reel video');
+  await text(B, '1 görüntülenme', 12000);
+  if (Number(await sql(`select count(*) from public.post_views`)) !== 1) throw new Error('izlenme kaydedilmedi');
+  await shot(B, 'reels-goruntulenme');
+  await B.reload();
+  await B.waitForSelector('nav');
+  await B.locator('nav button[aria-label="Reels"]').click();
+  await B.waitForTimeout(3500);
+  if (Number(await sql(`select count(*) from public.post_views`)) !== 1) throw new Error('aynı kişi iki kez sayıldı');
+  ok('Reels izlenince görüntülenme 1 oldu, sahibi ve tekrar izleme sayılmadı');
+
   fs.writeFileSync(path.join(SHOTS, 'results.txt'), results.join('\n'));
   console.log('\nTAMAM:', results.length, 'adım');
   await browser.close();

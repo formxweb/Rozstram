@@ -492,6 +492,14 @@ function App() {
   };
 
   /* ------------------------------------------------ gönderi eylemleri */
+  const viewedRef = useRef({});
+  const viewPost = (post) => {
+    if (!post || post.author === me.id || viewedRef.current[post.id]) return;
+    viewedRef.current[post.id] = true;
+    sb.rpc('view_post', { pid: post.id }).then(({ data }) => {
+      if (data === true) setPosts((m) => (m[post.id] ? { ...m, [post.id]: { ...m[post.id], views: (m[post.id].views || 0) + 1 } } : m));
+    }, noop);
+  };
   const setLike = (post, v) => {
     if (v) haptic(10);
     const now = Date.now();
@@ -1123,7 +1131,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,

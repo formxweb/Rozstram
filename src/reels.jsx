@@ -34,7 +34,7 @@ function ReelItem({ post, live }) {
   return (
     <section className="reel" ref={ref}>
       <div style={{ position: 'absolute', inset: 0 }} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onClick={click} onContextMenu={(e) => e.preventDefault()}>
-        <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={postFilter(post)} playing={playing} onProgress={setProg} />
+        <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={postFilter(post)} playing={playing} onProgress={setProg} onWatched={() => app.viewPost(post)} />
       </div>
       <div className="shade-top" />
       <div className="shade" />
@@ -62,6 +62,7 @@ function ReelItem({ post, live }) {
             <RichText text={post.caption} />
           </div>
         ) : null}
+        {post.views ? <div className="views"><Icon n="play" size={12} fill />{fmt(post.views)} görüntülenme</div> : null}
         <div className="audio"><Icon n="music" size={14} /><span className="track"><span>{app.nameOf(post.author)} · Orijinal ses</span><span>{app.nameOf(post.author)} · Orijinal ses</span></span></div>
       </div>
       <div className="vprog"><b style={{ width: prog * 100 + '%' }} /></div>
