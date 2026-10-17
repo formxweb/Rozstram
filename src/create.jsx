@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
-import { ADJUSTS, FILTERS, MAX_UPLOAD, STORY_BGS, STORY_FONTS, TEXT_COLORS, filterCss, haptic } from './lib.js';
+import { ADJUSTS, FILTERS, MAX_UPLOAD, STORY_BGS, STORY_FONTS, TEXT_COLORS, filterCss, haptic, snapshotFile } from './lib.js';
 import { Avatar, Empty, Icon, PersonRow, Sheet, Toggle, TopBar, Vid } from './ui.jsx';
 import { StoryText } from './stories.jsx';
 
@@ -57,7 +57,7 @@ export function CreateFlow({ mode: initialMode, onDone }) {
   useEffect(() => () => items.forEach((it) => URL.revokeObjectURL(it.url)), [items]);
 
   const pick = () => fileRef.current && fileRef.current.click();
-  const onFiles = (e) => {
+  const onFiles = async (e) => {
     const files = Array.prototype.slice.call(e.target.files || []);
     e.target.value = '';
     if (!files.length) return;
@@ -70,6 +70,10 @@ export function CreateFlow({ mode: initialMode, onDone }) {
     if (!chosen.length) { setError(mode === 'reel' ? 'Reels için bir video seç.' : 'Desteklenen bir dosya seç.'); return; }
     if (chosen.find((f) => f.size > MAX_UPLOAD && f.type.indexOf('video') === 0)) { setError('Bu video 50 MB’tan büyük. Daha kısa bir video seç ya da telefonunda kırp.'); return; }
     if (vids.length && files.length > 1 && mode === 'post') setError('Birden fazla dosya seçince sadece fotoğraflar alınır.');
+    try { chosen = await Promise.all(chosen.map(snapshotFile)); } catch (err) {
+      setError('Bu dosya okunamadı. Telefonuna indirip galeriden tekrar seç.');
+      return;
+    }
     setItems(chosen.map((f) => ({ file: f, url: URL.createObjectURL(f), type: f.type.indexOf('video') === 0 ? 'video' : 'image' })));
     setSlide(0);
     setStep(mode === 'story' ? 'story' : 'edit');

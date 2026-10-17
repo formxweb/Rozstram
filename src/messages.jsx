@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp, useBack } from './ctx.js';
 import { rowMessage, toMs } from './backend.js';
-import { REACTIONS, ago, copyText, haptic, mediaUrl, postFilter } from './lib.js';
+import { REACTIONS, ago, copyText, haptic, mediaUrl, postFilter, snapshotFile } from './lib.js';
 import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Spinner, Toggle, TopBar, UName, useLongPress, useTaps } from './ui.jsx';
 
 const EMOJI_ONLY = new RegExp('^(\\p{Extended_Pictographic}|\\uFE0F|\\u200D|\\s){1,6}$', 'u');
@@ -550,7 +550,7 @@ export function ChatScreen({ tid }) {
           ) : (
             <div className="chat-input">
               <button className="cam" aria-label="Fotoğraf ya da video gönder" onClick={() => fileRef.current && fileRef.current.click()}><Icon n="camera" size={20} /></button>
-              <input ref={fileRef} id="chat-file" type="file" accept="image/*,video/*" hidden onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) send({}, f); }} />
+              <input ref={fileRef} id="chat-file" type="file" accept="image/*,video/*" hidden onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) snapshotFile(f).then((c) => send({}, c), () => app.toast('Bu dosya okunamadı. Telefonuna indirip tekrar seç.')); }} />
               <textarea id="chat-input" rows={1} placeholder={editing ? 'Mesajı düzenle…' : 'Mesaj…'} value={text} maxLength={2000} onChange={(e) => onType(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }} />
               {text.trim()

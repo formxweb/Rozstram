@@ -149,6 +149,15 @@ function loadImage(url) {
 }
 
 /** Fotoğrafı küçültür ve (aspect verilirse) ortadan kırpar. */
+// Seçilen dosyayı hemen belleğe kopyalar. Android Chrome, galeriden seçilen dosya sonradan
+// "değişmiş" görünürse yüklemeyi sunucuya göndermeden keser (ERR_UPLOAD_FILE_CHANGED);
+// bellekteki kopya bundan etkilenmez.
+export async function snapshotFile(f) {
+  if (!f || typeof f.arrayBuffer !== 'function') return f;
+  const buf = await f.arrayBuffer();
+  return new File([buf], f.name || 'dosya', { type: f.type || 'application/octet-stream', lastModified: Date.now() });
+}
+
 export async function compressImage(file, max, aspect) {
   const url = URL.createObjectURL(file);
   try {
