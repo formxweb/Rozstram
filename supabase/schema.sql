@@ -63,6 +63,20 @@ create table if not exists public.blocks (
 );
 create index if not exists blocks_blocked_idx on public.blocks (blocked);
 
+-- Banlanan hesaplar: yönetici banlar, until boşsa kalıcıdır. Ban kaldırılınca satır silinmez, active=false olur.
+create table if not exists public.user_bans (
+  user_id         uuid primary key references public.profiles (id) on delete cascade,
+  active          boolean not null default true,
+  reason          text check (char_length(reason) <= 300),
+  until           timestamptz,
+  banned_by       uuid references public.profiles (id) on delete set null,
+  created_at      timestamptz not null default now(),
+  appeal          text check (char_length(appeal) <= 1000),
+  appeal_at       timestamptz,
+  appeal_rejected boolean not null default false,
+  lifted_at       timestamptz
+);
+
 create table if not exists public.follows (
   follower   uuid not null references public.profiles (id) on delete cascade,
   following  uuid not null references public.profiles (id) on delete cascade,
@@ -299,6 +313,20 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.blocks where blocker = owner and blocked = auth.uid());
 $$;
 
+-- Bu hesap şu an banlı mı? (süresi dolan geçici ban sayılmaz)
+create or replace function public.user_banned(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.user_bans b where b.user_id = uid and b.active and (b.until is null or b.until > now()));
+$$;
+
+-- Banlı hesabın profili ve içeriği herkesten gizlenir (kendisi ve yöneticiler hariç)
+create or replace function public.ban_hidden(uid uuid) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if uid is null or uid = auth.uid() or not public.user_banned(uid) then return false; end if;
+  return not exists (select 1 from public.app_admins a where a.user_id = auth.uid());
+end $$;
+
 -- Giriş yapan kullanıcı bu kişinin içeriğini görebilir mi?
 create or replace function public.can_view(owner uuid) returns boolean
 language sql stable security definer set search_path = public as $$
@@ -306,6 +334,7 @@ language sql stable security definer set search_path = public as $$
     or (
       auth.uid() is not null
       and not public.blocked_between(owner, auth.uid())
+      and not public.ban_hidden(owner)
       and (
         not coalesce((select is_private from public.profiles where id = owner), false)
         or exists (select 1 from public.follows f where f.follower = auth.uid() and f.following = owner and f.status = 'accepted')
@@ -349,7 +378,7 @@ create or replace function public.dm_blocked(tid uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from public.threads t join public.thread_members m on m.thread_id = t.id
-    where t.id = tid and not t.is_group and m.user_id <> auth.uid() and public.blocked_between(m.user_id, auth.uid())
+    where t.id = tid and not t.is_group and m.user_id <> auth.uid() and (public.blocked_between(m.user_id, auth.uid()) or public.user_banned(m.user_id))
   );
 $$;
 
@@ -710,6 +739,23 @@ end $$;
 create or replace trigger messages_after after insert or update on public.messages
   for each row execute function public.messages_after();
 
+-- Banlı hesap paylaşamaz, beğenemez, yorum/mesaj yazamaz, takip edemez, profilini değiştiremez
+create or replace function public.ban_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null and public.user_banned(auth.uid()) then raise exception 'banned'; end if;
+  return new;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['profiles', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_likes',
+                           'follows', 'threads', 'thread_members', 'messages', 'message_reactions'] loop
+    execute format('create or replace trigger aa_ban_guard before insert or update on public.%I for each row execute function public.ban_guard()', t);
+  end loop;
+end $$;
+
 -- =====================================================================
 -- 5) MESAJLAŞMA FONKSİYONLARI
 -- =====================================================================
@@ -725,6 +771,7 @@ begin
   if me is null or other is null or other = me then raise exception 'bad_target'; end if;
   if not exists (select 1 from public.profiles where id = other) then raise exception 'not_found'; end if;
   if public.blocked_between(me, other) then raise exception 'blocked'; end if;
+  if public.ban_hidden(other) then raise exception 'not_found'; end if;
   k := least(me::text, other::text) || ':' || greatest(me::text, other::text);
   select id into tid from public.threads where dm_key = k;
   if tid is null then
@@ -881,6 +928,8 @@ begin
     'messagesToday', (select count(*) from public.messages where created_at > now() - interval '24 hours'),
     'views', (select count(*) from public.post_views),
     'openReports', (select count(*) from public.reports where resolved_at is null),
+    'banned', (select count(*) from public.user_bans where active and (until is null or until > now())),
+    'appeals', (select count(*) from public.user_bans where active and (until is null or until > now()) and appeal_at is not null and not appeal_rejected),
     'boosts', coalesce((select jsonb_agg(jsonb_build_object('post', b.post_id, 'weight', b.weight, 'until', public.ms(b.until)) order by b.created_at desc)
                         from public.post_boosts b where b.until > now()), '[]'::jsonb),
     'removed', coalesce((select jsonb_agg(jsonb_build_object('post', r.post_id, 'reason', r.reason, 'at', public.ms(r.created_at)) order by r.created_at desc)
@@ -971,6 +1020,97 @@ begin
   update public.profiles set verified = coalesce(v, false) where id = uid;
 end $$;
 
+-- Ban bilgisi (yalnızca yönetici fonksiyonları ve kişinin kendisi için)
+create or replace function public.ban_json(uid uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select case when b.user_id is null then null else jsonb_build_object(
+    'reason', b.reason, 'until', case when b.until is null then null else public.ms(b.until) end, 'at', public.ms(b.created_at),
+    'appeal', b.appeal, 'appealAt', case when b.appeal_at is null then null else public.ms(b.appeal_at) end, 'appealRejected', b.appeal_rejected
+  ) end
+  from (select 1) one
+  left join public.user_bans b on b.user_id = uid and b.active and (b.until is null or b.until > now());
+$$;
+
+-- Banla: p_days boş ya da 0 ise kalıcı. Yönetici kendini ya da başka bir yöneticiyi banlayamaz.
+create or replace function public.admin_ban_user(uid uuid, p_reason text default null, p_days int default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  if uid is null or uid = auth.uid() or exists (select 1 from public.app_admins where user_id = uid) then raise exception 'not_allowed'; end if;
+  if not exists (select 1 from public.profiles where id = uid) then raise exception 'not_found'; end if;
+  insert into public.user_bans (user_id, active, reason, until, banned_by, created_at, appeal, appeal_at, appeal_rejected, lifted_at)
+  values (uid, true, nullif(left(btrim(coalesce(p_reason, '')), 300), ''),
+          case when coalesce(p_days, 0) > 0 then now() + make_interval(days => least(3650, p_days)) else null end,
+          auth.uid(), now(), null, null, false, null)
+  on conflict (user_id) do update set active = true, reason = excluded.reason, until = excluded.until, banned_by = excluded.banned_by,
+    created_at = now(), appeal = null, appeal_at = null, appeal_rejected = false, lifted_at = null;
+  update public.reports set resolved_at = now() where kind = 'user' and target = uid::text and resolved_at is null;
+  update public.profiles set last_seen = last_seen where id = uid;  -- banlanan kişinin uygulaması anında haberdar olsun
+  return public.ban_json(uid);
+end $$;
+
+create or replace function public.admin_unban_user(uid uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.user_bans set active = false, lifted_at = now() where user_id = uid and active;
+  update public.profiles set last_seen = last_seen where id = uid;
+end $$;
+
+-- İtirazı reddet (ban sürer, kişi itirazının incelendiğini görür)
+create or replace function public.admin_reject_appeal(uid uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.user_bans set appeal_rejected = true where user_id = uid and active and appeal_at is not null;
+  update public.profiles set last_seen = last_seen where id = uid;
+end $$;
+
+create or replace function public.admin_user_json(p public.profiles) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'id', p.id, 'username', p.username, 'displayName', p.full_name, 'avatar', p.avatar, 'verified', p.verified, 'at', public.ms(p.created_at),
+    'admin', exists (select 1 from public.app_admins a where a.user_id = p.id),
+    'posts', (select count(*) from public.posts where author = p.id),
+    'followers', (select count(*) from public.follows where following = p.id and status = 'accepted'),
+    'reports', (select count(*) from public.reports r where r.kind = 'user' and r.target = p.id::text and r.resolved_at is null),
+    'ban', public.ban_json(p.id)
+  );
+$$;
+
+-- Kullanıcılar: arama sonuçları (boş aramada en yeni hesaplar) + şu an banlı olanlar
+create or replace function public.admin_users(q text default '') returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare t text := regexp_replace(lower(btrim(coalesce(q, ''))), '^@', '');
+begin
+  perform public.admin_check();
+  return jsonb_build_object(
+    'users', coalesce((select jsonb_agg(public.admin_user_json(p) order by (p.username = t) desc, p.created_at desc) from (
+        select * from public.profiles p
+        where t = '' or position(t in p.username) > 0 or position(t in lower(p.full_name)) > 0
+        order by (p.username = t) desc, p.created_at desc limit 40) p), '[]'::jsonb),
+    'banned', coalesce((select jsonb_agg(public.admin_user_json(p) order by (b.appeal_at is not null and not b.appeal_rejected) desc, b.created_at desc)
+        from public.user_bans b join public.profiles p on p.id = b.user_id
+        where b.active and (b.until is null or b.until > now())), '[]'::jsonb)
+  );
+end $$;
+
+-- Kişinin kendi ban durumu ve itirazı
+create or replace function public.my_ban() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select public.ban_json(auth.uid());
+$$;
+
+create or replace function public.ban_appeal(p_text text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if char_length(btrim(coalesce(p_text, ''))) < 3 then raise exception 'empty_message'; end if;
+  if exists (select 1 from public.user_bans where user_id = auth.uid() and active and appeal_at is not null) then raise exception 'appeal_sent'; end if;
+  update public.user_bans set appeal = left(btrim(p_text), 1000), appeal_at = now()
+  where user_id = auth.uid() and active and (until is null or until > now());
+  if not found then raise exception 'not_allowed'; end if;
+end $$;
+
 -- =====================================================================
 -- 5c) MÜZİK KÜTÜPHANESİ
 -- =====================================================================
@@ -1050,7 +1190,8 @@ language sql stable as $$
     'id', p.id, 'username', p.username, 'displayName', p.full_name, 'bio', p.bio, 'website', p.website, 'category', p.category,
     'avatar', p.avatar, 'private', p.is_private, 'verified', p.verified, 'showActivity', p.show_activity, 'highlights', p.highlights,
     'note', case when p.note_at > now() - interval '24 hours' then p.note else null end, 'noteAt', case when p.note_at is null then null else public.ms(p.note_at) end,
-    'lastSeen', case when p.show_activity and p.last_seen is not null then public.ms(p.last_seen) else null end, 'at', public.ms(p.created_at)
+    'lastSeen', case when p.show_activity and p.last_seen is not null then public.ms(p.last_seen) else null end, 'at', public.ms(p.created_at),
+    'banned', case when public.is_admin() then public.user_banned(p.id) else false end
   );
 $$;
 
@@ -1096,6 +1237,7 @@ language sql stable set search_path = public as $$
     'closeFriends', coalesce((select jsonb_agg(c.friend) from public.close_friends c where c.owner = auth.uid()), '[]'::jsonb),
     'viewed', public.my_views(),
     'isAdmin', public.is_admin(),
+    'ban', public.my_ban(),
     'settings', coalesce((select jsonb_object_agg(s.key, s.value) from public.app_settings s), '{}'::jsonb),
     'notifications', coalesce((select jsonb_agg(x) from (
         select jsonb_build_object('id', n.id, 'kind', n.kind, 'actor', n.actor, 'post', n.post_id, 'cid', n.comment_id, 'story', n.story_id,
@@ -1182,6 +1324,7 @@ alter table public.app_settings      enable row level security;
 alter table public.post_boosts       enable row level security;
 alter table public.post_removals     enable row level security;
 alter table public.music_tracks      enable row level security;
+alter table public.user_bans         enable row level security;
 drop policy if exists music_select on public.music_tracks;
 create policy music_select on public.music_tracks for select to authenticated using (active or public.is_admin());
 drop policy if exists app_settings_select on public.app_settings;
@@ -1189,7 +1332,7 @@ create policy app_settings_select on public.app_settings for select to authentic
 
 -- profiller: herkes görür (seni engelleyenler hariç), sadece kendin düzenlersin
 drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles for select to authenticated using (not public.blocked_me(id));
+create policy profiles_select on public.profiles for select to authenticated using (not public.blocked_me(id) and not public.ban_hidden(id));
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
@@ -1210,9 +1353,10 @@ create policy follows_select on public.follows for select to authenticated using
   (follower = auth.uid() or following = auth.uid()
    or (status = 'accepted' and (public.can_view(follower) or public.can_view(following))))
   and not public.blocked_between(follower, following)
+  and not public.ban_hidden(follower) and not public.ban_hidden(following)
 );
 drop policy if exists follows_insert on public.follows;
-create policy follows_insert on public.follows for insert to authenticated with check (follower = auth.uid());
+create policy follows_insert on public.follows for insert to authenticated with check (follower = auth.uid() and not public.ban_hidden(following));
 drop policy if exists follows_update on public.follows;
 create policy follows_update on public.follows for update to authenticated using (following = auth.uid()) with check (following = auth.uid());
 drop policy if exists follows_delete on public.follows;
@@ -1241,7 +1385,7 @@ drop policy if exists posts_delete on public.posts;
 create policy posts_delete on public.posts for delete to authenticated using (author = auth.uid());
 
 drop policy if exists post_likes_select on public.post_likes;
-create policy post_likes_select on public.post_likes for select to authenticated using (exists (select 1 from public.posts p where p.id = post_id));
+create policy post_likes_select on public.post_likes for select to authenticated using (exists (select 1 from public.posts p where p.id = post_id) and not public.ban_hidden(user_id));
 drop policy if exists post_likes_insert on public.post_likes;
 create policy post_likes_insert on public.post_likes for insert to authenticated with check (user_id = auth.uid() and exists (select 1 from public.posts p where p.id = post_id));
 drop policy if exists post_likes_delete on public.post_likes;
@@ -1250,7 +1394,7 @@ create policy post_likes_delete on public.post_likes for delete to authenticated
 -- yorumlar
 drop policy if exists comments_select on public.comments;
 create policy comments_select on public.comments for select to authenticated using (
-  exists (select 1 from public.posts p where p.id = post_id) and not public.blocked_between(author, auth.uid())
+  exists (select 1 from public.posts p where p.id = post_id) and not public.blocked_between(author, auth.uid()) and not public.ban_hidden(author)
 );
 drop policy if exists comments_insert on public.comments;
 create policy comments_insert on public.comments for insert to authenticated with check (
@@ -1262,7 +1406,7 @@ create policy comments_delete on public.comments for delete to authenticated usi
 );
 
 drop policy if exists comment_likes_select on public.comment_likes;
-create policy comment_likes_select on public.comment_likes for select to authenticated using (exists (select 1 from public.comments c where c.id = comment_id));
+create policy comment_likes_select on public.comment_likes for select to authenticated using (exists (select 1 from public.comments c where c.id = comment_id) and not public.ban_hidden(user_id));
 drop policy if exists comment_likes_insert on public.comment_likes;
 create policy comment_likes_insert on public.comment_likes for insert to authenticated with check (user_id = auth.uid() and exists (select 1 from public.comments c where c.id = comment_id));
 drop policy if exists comment_likes_delete on public.comment_likes;
@@ -1329,7 +1473,7 @@ create policy reactions_delete on public.message_reactions for delete to authent
 -- bildirimler
 drop policy if exists notifications_select on public.notifications;
 create policy notifications_select on public.notifications for select to authenticated using (
-  user_id = auth.uid() and not public.blocked_between(user_id, actor)
+  user_id = auth.uid() and not public.blocked_between(user_id, actor) and not public.ban_hidden(actor)
   and public.notif_live(kind, actor, user_id, post_id, comment_id, story_id)
 );
 drop policy if exists notifications_update on public.notifications;
@@ -1368,7 +1512,7 @@ revoke update on public.comments from authenticated;
 revoke update on public.stories from authenticated;
 revoke select, update, delete on public.reports from authenticated;
 revoke all on public.post_views from authenticated;
-revoke all on public.app_admins, public.post_boosts, public.post_removals from authenticated;
+revoke all on public.app_admins, public.post_boosts, public.post_removals, public.user_bans from authenticated;
 revoke insert, update, delete on public.app_settings from authenticated;
 revoke insert, update, delete on public.music_tracks from authenticated;
 
@@ -1387,6 +1531,8 @@ grant execute on function
   public.admin_resolve_report(bigint), public.admin_remove_post(uuid, text), public.admin_restore_post(uuid),
   public.admin_boost_post(uuid, numeric, int), public.admin_set_rank(jsonb), public.admin_set_verified(uuid, boolean),
   public.admin_add_track(text, text, text, text, numeric), public.admin_set_track_active(uuid, boolean),
+  public.user_banned(uuid), public.ban_hidden(uuid), public.my_ban(), public.ban_appeal(text),
+  public.admin_ban_user(uuid, text, int), public.admin_unban_user(uuid), public.admin_reject_appeal(uuid), public.admin_users(text),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),
@@ -1430,7 +1576,7 @@ on conflict (id) do update set public = true, file_size_limit = excluded.file_si
 
 drop policy if exists media_insert on storage.objects;
 create policy media_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
+  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text and not public.user_banned(auth.uid()));
 drop policy if exists media_update on storage.objects;
 create policy media_update on storage.objects for update to authenticated
   using (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);

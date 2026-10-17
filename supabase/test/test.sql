@@ -320,6 +320,65 @@ select t.as_user('00000000-0000-0000-0000-00000000000d');
 select t.ok((select count(*) from public.music_tracks) = 12, 'gizlenen müzik kullanıcıya görünmez');
 select t.as_user('00000000-0000-0000-0000-00000000000a');
 
+-- ------------------------------------------------------------------ banlama
+\echo '== banlama'
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.err($q$select public.admin_ban_user('00000000-0000-0000-0000-00000000000d', 'spam', 7)$q$, 'not_allowed', 'yönetici olmayan banlayamaz');
+select t.err($q$select * from public.user_bans$q$, 'permission denied', 'ban listesi doğrudan okunamaz');
+select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 1, 'bandan önce dave görünür');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.err($q$select public.admin_ban_user('00000000-0000-0000-0000-00000000000b', 'x', 1)$q$, 'not_allowed', 'yönetici kendini banlayamaz');
+select t.ok((public.admin_ban_user('00000000-0000-0000-0000-00000000000d', '  Spam  ', null) ->> 'reason') = 'Spam', 'yönetici daveyi kalıcı banladı');
+select t.ok(public.user_banned('00000000-0000-0000-0000-00000000000d'), 'dave banlı');
+select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 1, 'yönetici banlı profili görür');
+select t.ok((select (public.profile_json(p) ->> 'banned')::boolean from public.profiles p where id = '00000000-0000-0000-0000-00000000000d'), 'yönetici profilde ban işaretini görür');
+select t.ok((public.admin_users('dave') -> 'users' -> 0 -> 'ban' ->> 'reason') = 'Spam', 'yönetici aramasında ban bilgisi');
+select t.ok(jsonb_array_length(public.admin_users('') -> 'banned') = 1, 'banlılar listesi');
+select t.ok((public.admin_overview() ->> 'banned')::int = 1, 'genel bakışta banlı sayısı');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 0, 'banlı profil başkalarına görünmez');
+select t.ok((select count(*) from public.posts where author = '00000000-0000-0000-0000-00000000000d') = 0, 'banlı hesabın gönderileri görünmez');
+select t.ok((select (profile_json(p) ->> 'banned')::boolean from public.profiles p where id = auth.uid()) = false, 'normal kullanıcıya ban işareti hep kapalı');
+select t.err($q$insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-00000000000d')$q$, 'row-level security', 'banlı hesap takip edilemez');
+select t.err($q$select public.start_dm('00000000-0000-0000-0000-00000000000d')$q$, 'not_found', 'banlı hesaba yeni sohbet açılamaz');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.bootstrap() -> 'ban' ->> 'reason') = 'Spam', 'banlı kişi açılışta ban bilgisini alır');
+select t.ok((public.my_ban() ->> 'until') is null, 'kalıcı ban (bitiş yok)');
+select t.ok((select count(*) from public.profiles where id = auth.uid()) = 1, 'banlı kişi kendi profilini görür');
+select t.err($q$insert into public.posts (media) values ('[{"id":"d/p/z.jpg","type":"image"}]')$q$, 'banned', 'banlı kişi paylaşım yapamaz');
+select t.err($q$update public.profiles set bio = 'yeni' where id = auth.uid()$q$, 'banned', 'banlı kişi profilini değiştiremez');
+select t.err($q$insert into public.post_likes (post_id) values ('10000000-0000-0000-0000-0000000000f1')$q$, 'banned', 'banlı kişi beğenemez');
+select t.err($q$insert into public.comments (post_id, text) values ('10000000-0000-0000-0000-0000000000f1', 'selam')$q$, 'banned', 'banlı kişi yorum yapamaz');
+select t.err($q$select public.ban_appeal('  ')$q$, 'empty_message', 'boş itiraz gönderilemez');
+select public.ban_appeal('Hesabım çalınmıştı, artık güvende.');
+select t.ok((public.my_ban() ->> 'appeal') = 'Hesabım çalınmıştı, artık güvende.', 'itiraz gönderildi');
+select t.err($q$select public.ban_appeal('tekrar')$q$, 'appeal_sent', 'itiraz bir kez gönderilir');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.ok((public.admin_overview() ->> 'appeals')::int = 1, 'itiraz yöneticiye düştü');
+select public.admin_reject_appeal('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.admin_overview() ->> 'appeals')::int = 0, 'reddedilen itiraz listeden düştü');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((public.my_ban() ->> 'appealRejected')::boolean, 'kişi itirazının reddedildiğini görür');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select public.admin_unban_user('00000000-0000-0000-0000-00000000000d');
+select t.ok(not public.user_banned('00000000-0000-0000-0000-00000000000d'), 'ban kaldırıldı');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 1, 'ban kalkınca profil yine görünür');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok(public.my_ban() is null, 'ban kalkınca açılışta ban yok');
+update public.profiles set bio = 'geri döndüm' where id = auth.uid();
+select t.ok(true, 'ban kalkınca profil düzenlenebilir');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.ok((public.admin_ban_user('00000000-0000-0000-0000-00000000000d', 'Taciz', 7) ->> 'until') is not null, '7 günlük geçici ban');
+select t.ok((public.admin_users('dave') -> 'users' -> 0 -> 'ban' ->> 'appeal') is null, 'yeni banda eski itiraz silinir');
+select t.err($q$select public.ban_json('00000000-0000-0000-0000-00000000000d')$q$, 'permission denied', 'ban ayrıntısı herkese açık değil');
+reset role;
+update public.user_bans set until = now() - interval '1 minute' where user_id = '00000000-0000-0000-0000-00000000000d';
+set role authenticated;
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok(public.my_ban() is null and not public.user_banned(auth.uid()), 'süresi dolan ban kendiliğinden biter');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
 reset role;

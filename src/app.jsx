@@ -7,7 +7,8 @@ import {
 import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo, snapshotFile } from './lib.js';
 import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
 import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
-import { AdminScreen } from './admin.jsx';
+import { AdminScreen, BanSheet } from './admin.jsx';
+import { BannedScreen } from './banned.jsx';
 import { MusicScreen } from './music.jsx';
 import { stopMusic } from './player.jsx';
 import { HomeScreen, CommentsSheet, LikesSheet, SendSheet, PostScreen, PeekModal } from './feed.jsx';
@@ -22,6 +23,7 @@ import { ActivityScreen } from './activity.jsx';
 import { AuthScreen } from './auth.jsx';
 
 const FULLSCREEN = { chat: 1, create: 1, edit: 1, newmsg: 1 };
+const BAN_TEXT = errText({ message: 'banned' });
 const noop = () => {};
 const map = (arr) => { const m = {}; (arr || []).forEach((x) => { m[x.id] = x; }); return m; };
 const flag = (arr) => { const m = {}; (arr || []).forEach((x) => { m[x] = true; }); return m; };
@@ -46,6 +48,7 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [viewed, setViewed] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
+  const [ban, setBan] = useState(null);
   const [settings, setSettings] = useState({});
   const [rankEpoch, setRankEpoch] = useState(0);
   const [conn, setConn] = useState('ok');
@@ -68,6 +71,7 @@ function App() {
 
   const toastTimer = useRef(null);
   const meRef = useRef(me); meRef.current = me;
+  const banRef = useRef(ban); banRef.current = ban;
   const postsRef = useRef(postsMap); postsRef.current = postsMap;
   const threadsRef = useRef(threadsMap); threadsRef.current = threadsMap;
   const baseRef = useRef(base); baseRef.current = base;
@@ -77,7 +81,9 @@ function App() {
   const fetchingThreads = useRef({});
   const deepLink = useRef(null);
 
+  const checkBanRef = useRef(noop);
   const toast = useCallback((text, action) => {
+    if (text === BAN_TEXT) checkBanRef.current();
     setToastMsg({ text, action, k: Date.now() });
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(null), action ? 4200 : 2600);
@@ -113,7 +119,7 @@ function App() {
 
   const resetData = () => {
     setBase({}); setFollows({}); setPosts({}); setComments({}); setStories({}); setThreads({}); setSavedMap({}); setHiddenMap({});
-    setBlocks({}); setMutes({}); setCloseFriends({}); setNotifs([]); setAccount(null); setLoaded(false); setPeers({});
+    setBlocks({}); setMutes({}); setCloseFriends({}); setNotifs([]); setAccount(null); setLoaded(false); setPeers({}); setBan(null);
     setStack([]); setTab('home'); setVisited({ home: true }); setStoryView(null); setPanel(null); setSheet(null);
     loadedUsers.current = {};
   };
@@ -149,11 +155,24 @@ function App() {
     setAccount(data.account || null);
     setViewed(flag(data.viewed));
     setIsAdmin(!!data.isAdmin);
+    setBan(data.ban || null);
     setSettings(data.settings || {});
     setRankEpoch((e) => e + 1);
     setLoaded(true);
     return true;
   }, [sb, toast]);
+
+  /* ban durumu: açılışta, kendi profil satırı değişince (yönetici banlayınca/kaldırınca) ve bir işlem 'banned' hatası verince */
+  const checkBan = useCallback(async () => {
+    if (!sb || !meRef.current.id) return;
+    const { data, error } = await sb.rpc('my_ban');
+    if (error) return;
+    const was = banRef.current;
+    setBan(data || null);
+    if (was && !data) boot(true);  // ban kalktı: verileri tazele
+  }, [sb, boot]);
+  checkBanRef.current = checkBan;
+  useEffect(() => { if (ban) stopMusic(); }, [ban]);
 
   useEffect(() => {
     if (!sb || !me.id) return undefined;
@@ -182,7 +201,8 @@ function App() {
     switch (table) {
       case 'profiles':
         if (ev === 'DELETE') setBase((m) => omit(m, old.id));
-        else setBase((m) => ({ ...m, [nw.id]: rowProfile(nw) }));
+        else setBase((m) => ({ ...m, [nw.id]: { ...rowProfile(nw), banned: !!(m[nw.id] && m[nw.id].banned) } }));
+        if (ev !== 'DELETE' && nw.id === myId) checkBanRef.current();
         break;
       case 'follows': {
         const r = ev === 'DELETE' ? old : nw;
@@ -316,7 +336,7 @@ function App() {
   /* son görülme + uygulamaya geri dönünce yenile */
   useEffect(() => {
     if (!sb || !me.id || !loaded) return undefined;
-    const touch = () => sb.from('profiles').update({ last_seen: iso() }).eq('id', me.id).then(noop, noop);
+    const touch = () => sb.from('profiles').update({ last_seen: iso() }).eq('id', me.id).then(({ error }) => { if (errCodeOf(error) === 'banned') checkBanRef.current(); }, noop);
     touch();
     let hiddenAt = 0;
     const onVis = () => {
@@ -1085,6 +1105,19 @@ function App() {
       return adminRpc('admin_add_track', { p_title: meta.title, p_artist: meta.artist || '', p_genre: meta.genre || '', p_url: path, p_duration: Math.round(duration * 10) / 10 }, 'Müzik kütüphaneye eklendi');
     },
     setTrackActive: (id, v) => adminRpc('admin_set_track_active', { tid: id, v }, v ? 'Müzik kütüphanede görünüyor' : 'Müzik gizlendi'),
+    users: (q) => adminRpc('admin_users', { q: q || '' }),
+    ban: async (uid, reason, days) => {
+      const data = await adminRpc('admin_ban_user', { uid, p_reason: reason || null, p_days: days || null },
+        '@' + nameOf(uid) + (days ? ' ' + days + ' gün banlandı' : ' kalıcı olarak banlandı'));
+      if (data) patchBase(uid, (p) => ({ ...p, banned: true }));
+      return data;
+    },
+    unban: async (uid) => {
+      const ok = await adminRpc('admin_unban_user', { uid }, 'Ban kaldırıldı');
+      if (ok) patchBase(uid, (p) => ({ ...p, banned: false }));
+      return ok;
+    },
+    rejectAppeal: (uid) => adminRpc('admin_reject_appeal', { uid }, 'İtiraz reddedildi, ban sürüyor'),
     setRank: async (w) => {
       const data = await adminRpc('admin_set_rank', { v: w }, 'Algoritma ayarları kaydedildi');
       if (data) { setSettings((s) => ({ ...s, rank: data })); scoreCache.current.epoch = -1; setRankEpoch((e) => e + 1); }
@@ -1159,6 +1192,7 @@ function App() {
   const openSend = (post) => setPanel({ type: 'send', post, k: rid() });
   const openCreate = (mode, extra) => push({ type: 'create', mode: mode || 'post', ...(extra || {}) });
   const openMusic = (id) => { if (id) { setPanel(null); push({ type: 'music', id }); } };
+  const openBan = (uid) => { if (isAdmin && uid && uid !== me.id) setPanel({ type: 'ban', uid, k: rid() }); };
   const openTag = (tag) => { setPanel(null); setStoryView(null); push({ type: 'tag', tag: tag.replace(/^#/, '') }); };
   const openThread = (tid) => { setPanel(null); setStoryView(null); push({ type: 'chat', tid }); };
   const openChatWith = async (uid) => {
@@ -1192,6 +1226,7 @@ function App() {
     if (isAdmin) {
       if (post.boost > 0) items.push({ label: 'Öne çıkarmayı bitir (Yönetici)', icon: 'flame', onClick: () => admin.boost(post, 0) });
       else items.push({ label: 'Öne çıkar (Yönetici)', icon: 'flame', onClick: () => setSheet({ title: 'Ne kadar süre öne çıksın?', items: [1, 3, 7].map((d) => ({ label: d + ' gün', icon: 'clock', onClick: () => admin.boost(post, d) })) }) });
+      if (!mine && !(profiles[post.author] || {}).banned) items.push({ label: 'Kullanıcıyı banla (Yönetici)', icon: 'shield', danger: true, onClick: () => openBan(post.author) });
       if (!mine) items.push({ label: 'Gönderiyi kaldır (Yönetici)', icon: 'trash', danger: true, onClick: () => confirm({ title: 'Gönderi kaldırılsın mı?', text: 'Sahibi dışında kimse göremez. Yönetici panelinden geri getirebilirsin.', ok: 'Kaldır', danger: true, onOk: () => admin.remove(post, 'Yönetici kaldırdı') }) });
     }
     if (mine) items.push({ label: 'Sil', icon: 'trash', danger: true, onClick: () => confirm({ title: 'Gönderi silinsin mi?', ok: 'Sil', danger: true, onOk: () => deletePost(post) }) });
@@ -1221,7 +1256,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    viewPost, rankList, isAdmin, admin, settings, openMusic, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, rankList, isAdmin, admin, settings, openMusic, openBan, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,
@@ -1238,6 +1273,7 @@ function App() {
   }
   if (phase === 'auth') return <AuthScreen sb={sb} onSignedUp={(id) => store.set('onboard:' + id, true)} />;
   if (!loaded) return <BootScreen note={conn === 'down' ? 'Bağlantı kuruluyor…' : null} retry={conn === 'down' ? () => boot(false).then((ok) => setConn(ok ? 'ok' : 'down')) : null} />;
+  if (ban) return <BannedScreen ban={ban} username={myProfile && myProfile.username} sb={sb} onLogout={logout} onCheck={checkBan} />;
 
   const renderPage = (o, i) => {
     const onBack = () => popTo(i);
@@ -1302,6 +1338,7 @@ function App() {
         {panel && panel.type === 'editPost' ? <EditPostSheet key={panel.k} post={panel.post} onClose={() => setPanel(null)} /> : null}
         {panel && panel.type === 'shareProfile' ? <ShareProfileSheet key={panel.k} uid={panel.uid} onClose={() => setPanel(null)} /> : null}
         {panel && panel.type === 'highlight' ? <HighlightSheet key={panel.k} storyId={panel.storyId} onClose={() => setPanel(null)} /> : null}
+        {panel && panel.type === 'ban' ? <BanSheet key={panel.k} uid={panel.uid} onClose={() => setPanel(null)} /> : null}
         {panel && panel.type === 'report' ? <ReportSheet key={panel.k} kind={panel.kind} target={panel.target} extra={panel.extra} onClose={() => setPanel(null)} /> : null}
         {peek ? <PeekModal postId={peek} onClose={() => setPeek(null)} /> : null}
         {sheet ? <ActionSheet sheet={sheet} onClose={() => setSheet(null)} /> : null}

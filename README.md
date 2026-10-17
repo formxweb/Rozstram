@@ -21,6 +21,11 @@ başındaki `W` ve `scorePost` içindedir.
 Ayarlar → Yönetim → Yönetici paneli (sadece `app_admins` tablosundaki hesaplar görür).
 Genel bakış, algoritma ağırlıkları, şikayetler (gönderiyi kaldır / görmezden gel), öne çıkanlar ve
 mavi tik. Gönderiyi öne çıkarmak için gönderinin ••• menüsü → "Öne çıkar (Yönetici)".
+Banlama: Yönetici paneli → Kullanıcılar (ara → Banla), profilin ••• menüsü ya da gönderinin ••• menüsü →
+"Banla (Yönetici)". Neden ve süre (1 / 7 / 30 gün ya da kalıcı) seçilir. Banlı hesap uygulamada sadece
+"Hesabın askıya alındı" ekranını görür (neden, süre, bir kez itiraz); paylaşım, beğeni, yorum, mesaj, takip,
+dosya yükleme sunucuda engellenir; profili ve içeriği başkalarından gizlenir. İtirazlar Kullanıcılar sekmesinde
+kabul edilir (ban kalkar) ya da reddedilir. Yönetici kendini ya da başka bir yöneticiyi banlayamaz.
 Yeni yönetici eklemek: Supabase SQL Editor'de
 `insert into public.app_admins (user_id) select id from public.profiles where username = 'KULLANICI_ADI';`
 
@@ -45,4 +50,5 @@ bash test/restart.sh && node test/e2e.js && STEP0=40 node test/e2e2.js   # taray
 node test/rank.test.js           # akış algoritması testleri
 node test/admin-e2e.js           # yönetici paneli testi
 node test/music-e2e.js           # müzik testi
+node test/ban-e2e.js             # banlama testi
 ```

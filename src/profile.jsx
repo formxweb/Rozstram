@@ -51,6 +51,9 @@ export function ProfileScreen({ uid, isTab }) {
       { label: app.blocks[uid] ? 'Engeli kaldır' : 'Engelle', icon: 'shield', danger: !app.blocks[uid], onClick: () => (app.blocks[uid] ? app.unblock(uid) : app.block(uid)) },
       { label: 'Şikayet et', icon: 'flag', danger: true, onClick: () => app.openReport('user', uid) },
       ...(app.isAdmin ? [{ label: (app.profiles[uid] && app.profiles[uid].verified ? 'Mavi tiki kaldır' : 'Mavi tik ver') + ' (Yönetici)', icon: 'verified', onClick: () => app.admin.verify(uid, !(app.profiles[uid] && app.profiles[uid].verified)) }] : []),
+      ...(app.isAdmin ? [p && p.banned
+        ? { label: 'Banı kaldır (Yönetici)', icon: 'shield', onClick: () => app.admin.unban(uid) }
+        : { label: 'Banla (Yönetici)', icon: 'shield', danger: true, onClick: () => app.openBan(uid) }] : []),
     ],
   });
 
@@ -77,6 +80,10 @@ export function ProfileScreen({ uid, isTab }) {
   return (
     <div className={isTab ? 'scroller' : 'body'} ref={scRef}>
       {top}
+      {app.isAdmin && !isMe && p && p.banned ? (
+        <div className="removed-note ban-note" role="status"><Icon n="shield" size={16} /><span className="grow">Bu hesap banlı. Kullanıcılar profili ve paylaşımları göremez.</span>
+          <button className="btn small" onClick={() => app.admin.unban(uid)}>Banı kaldır</button></div>
+      ) : null}
       <div className="g">
         <div className="prof-head">
           <Avatar uid={uid} size={88} ring={ring} online={app.isOnline(uid)} onClick={ring ? () => app.openStories(uid) : isMe ? () => app.openCreate('story') : undefined} />

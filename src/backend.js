@@ -124,6 +124,9 @@ const ERRORS = {
   not_allowed: 'Bunu yapma iznin yok.',
   need_members: 'Gruba en az bir kişi ekle.',
   empty_message: 'Boş mesaj gönderilemez.',
+  banned: 'Hesabın askıya alındı.',
+  appeal_sent: 'İtirazın zaten gönderildi.',
+  not_found: 'Bulunamadı; hesap ya da içerik artık yok.',
 };
 export function errCodeOf(e) {
   if (!e) return '';

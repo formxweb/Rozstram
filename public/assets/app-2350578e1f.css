@@ -831,6 +831,48 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .adm-search input { flex: 1; border: 0; background: none; padding: 11px 0; font-size: 15px; color: var(--fg); outline: none; }
 .removed-note { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--like); background: rgba(237, 73, 86, .08); padding: 8px 12px; }
 
+/* ---------------------------------------------------------------- ban */
+.ban-sheet .ban-who { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
+.ban-sheet .ban-who .grow b { font-size: 15px; }
+.ban-sheet .ban-who .grow span { font-size: 13px; color: var(--muted); }
+.ban-sheet .chips-sel { gap: 8px; }
+.ban-btn { background: var(--like); color: #fff; }
+.adm-card.user-card .row-card-in { display: flex; align-items: center; gap: 10px; }
+.adm-card.user-card .row-card-in .btn, .adm-card.user-card .row-card-in .pill { flex: none; }
+.adm-card.is-banned { border-color: rgba(237, 73, 86, .35); background: rgba(237, 73, 86, .04); }
+.ban-info { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.ban-info > div:first-child { display: flex; align-items: center; gap: 8px; }
+.ban-info .when { margin-left: auto; font-size: 12px; color: var(--muted); }
+.ban-info .reason { margin-top: 0; font-size: 13.5px; }
+.ban-appeal { background: var(--soft); border-radius: 12px; padding: 10px 12px; }
+.ban-appeal b { font-size: 12.5px; color: var(--link); }
+.ban-appeal.off b { color: var(--muted); }
+.ban-appeal p { font-size: 14px; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ban-appeal .adm-actions { padding-top: 10px; }
+.ban-note { gap: 10px; }
+.ban-note .btn { flex: none; }
+.banned { min-height: 100dvh; display: grid; place-items: center; padding: 28px 16px calc(28px + env(safe-area-inset-bottom)); background: var(--bg); color: var(--fg); }
+.banned-card { width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+.banned-icon { width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center; color: var(--like); background: rgba(237, 73, 86, .1); box-shadow: 0 0 0 8px rgba(237, 73, 86, .05); margin-top: 8px; }
+.banned h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; }
+.banned-text { font-size: 14.5px; color: var(--muted); line-height: 1.5; }
+.banned-text b { color: var(--fg); }
+.banned-box { width: 100%; border: 1px solid var(--line); border-radius: 16px; text-align: left; }
+.banned-box > div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 14px; }
+.banned-box > div + div { border-top: 1px solid var(--line); }
+.banned-box span { color: var(--muted); flex: none; }
+.banned-box b { text-align: right; overflow-wrap: anywhere; }
+.banned-appeal { width: 100%; display: grid; gap: 8px; text-align: left; }
+.banned-appeal label { font-size: 13px; font-weight: 700; color: var(--muted); }
+.banned-appeal textarea { border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 12px; padding: 11px 14px; font-size: 15px; resize: none; outline: none; }
+.banned-appeal textarea:focus { border-color: var(--faint); }
+.banned-appeal.done { display: flex; align-items: flex-start; gap: 10px; background: var(--soft); border-radius: 14px; padding: 12px 14px; font-size: 14px; color: var(--fg); }
+.banned-appeal.done svg { flex: none; color: #1fa356; margin-top: 1px; }
+.banned-appeal.done.rejected svg { color: var(--muted); }
+.banned-err { font-size: 13px; color: var(--like); }
+.banned-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.banned-actions .btn { height: 42px; }
+
 /* ---------------------------------------------------------------- müzik */
 .mus-cover { flex: none; border-radius: 10px; display: grid; place-items: center; color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
 .mus-cover .eq { display: flex; gap: 3px; align-items: flex-end; height: 40%; }
