@@ -219,7 +219,7 @@ select t.ok((select count(*) from public.thread_members where thread_id = :'gid'
 insert into public.messages (thread_id, text) values (:'gid', 'Grup selam');
 select t.as_user('00000000-0000-0000-0000-00000000000c');
 select t.ok((select count(*) from public.messages where thread_id = :'gid') = 1, 'grup üyesi mesajı görür');
-select public.leave_thread(:'gid');
+delete from public.thread_members where thread_id = :'gid' and user_id = auth.uid();
 select t.ok((select count(*) from public.messages where thread_id = :'gid') = 0, 'gruptan çıkan artık görmez');
 
 -- ------------------------------------------------------------------ engelleme
@@ -240,8 +240,9 @@ select t.err($q$insert into storage.objects (bucket_id, name) values ('media', '
 
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
-select public.delete_my_account();
 reset role;
+-- delete-account sunucu fonksiyonunun yaptığı: auth.admin.deleteUser
+delete from auth.users where id = '00000000-0000-0000-0000-00000000000a';
 select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000a') = 0, 'profil silindi');
 select t.ok((select count(*) from public.posts where author = '00000000-0000-0000-0000-00000000000a') = 0, 'gönderiler silindi');
 select t.ok((select count(*) from public.usernames where name in ('alice', 'alice.kaya') and user_id is null) = 2, 'eski kullanıcı adları kilitli kaldı');

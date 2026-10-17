@@ -322,6 +322,19 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.thread_members where thread_id = tid and user_id = auth.uid());
 $$;
 
+-- Bildirim hâlâ geçerli mi? Geri alınan beğeni, bırakılan takip, kabul edilen
+-- ya da silinen istek bildirimleri listede görünmez.
+create or replace function public.notif_live(k text, a uuid, u uuid, p uuid, c uuid, s uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select case k
+    when 'like' then exists (select 1 from public.post_likes where post_id = p and user_id = a)
+    when 'clike' then exists (select 1 from public.comment_likes where comment_id = c and user_id = a)
+    when 'slike' then exists (select 1 from public.story_likes where story_id = s and user_id = a)
+    when 'request' then exists (select 1 from public.follows where follower = a and following = u and status = 'pending')
+    when 'follow' then exists (select 1 from public.follows where follower = a and following = u and status = 'accepted')
+    else true end;
+$$;
+
 -- 1:1 sohbette karşı taraf engellenmiş mi?
 create or replace function public.dm_blocked(tid uuid) returns boolean
 language sql stable security definer set search_path = public as $$
@@ -400,7 +413,6 @@ create or replace function public.signup_rate_ok(p_ip text) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare n int;
 begin
-  delete from public.signup_log where created_at < now() - interval '2 days';
   select count(*) into n from public.signup_log where ip = coalesce(p_ip, '?') and created_at > now() - interval '1 hour';
   if n >= 8 then return false; end if;
   insert into public.signup_log (ip) values (coalesce(p_ip, '?'));
@@ -460,13 +472,6 @@ begin
   update public.accounts set email = em, phone = ph where user_id = me;
 end $$;
 
--- Hesabı kalıcı olarak sil (kullanıcı adı kilitli kalır)
-create or replace function public.delete_my_account() returns void
-language plpgsql security definer set search_path = public, auth as $$
-begin
-  if auth.uid() is null then raise exception 'not_authenticated'; end if;
-  delete from auth.users where id = auth.uid();
-end $$;
 
 -- =====================================================================
 -- 4) TETİKLEYİCİLER (bütünlük + bildirimler)
@@ -506,30 +511,15 @@ language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
     perform public.notify(new.following, new.follower, case when new.status = 'pending' then 'request' else 'follow' end);
-  elsif tg_op = 'UPDATE' then
-    if old.status = 'pending' and new.status = 'accepted' then
-      delete from public.notifications where user_id = new.following and actor = new.follower and kind = 'request';
-      perform public.notify(new.following, new.follower, 'follow');
-      perform public.notify(new.follower, new.following, 'accepted');
-    end if;
-  else
-    delete from public.notifications where user_id = old.following and actor = old.follower and kind in ('request', 'follow');
+  elsif old.status = 'pending' and new.status = 'accepted' then
+    perform public.notify(new.following, new.follower, 'follow');
+    perform public.notify(new.follower, new.following, 'accepted');
   end if;
   return null;
 end $$;
-create or replace trigger follows_after after insert or update or delete on public.follows
+create or replace trigger follows_after after insert or update on public.follows
   for each row execute function public.follows_after();
 
--- engelleme: iki yönlü takibi kaldır
-create or replace function public.blocks_after() returns trigger
-language plpgsql security definer set search_path = public as $$
-begin
-  delete from public.follows where (follower = new.blocker and following = new.blocked) or (follower = new.blocked and following = new.blocker);
-  delete from public.close_friends where (owner = new.blocker and friend = new.blocked) or (owner = new.blocked and friend = new.blocker);
-  return null;
-end $$;
-create or replace trigger blocks_after after insert on public.blocks
-  for each row execute function public.blocks_after();
 
 -- gönderi: yazar sabit, en fazla 3 sabitlenmiş gönderi
 create or replace function public.posts_before() returns trigger
@@ -575,14 +565,10 @@ create or replace trigger posts_after after insert or update of caption, tagged 
 create or replace function public.post_likes_after() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if tg_op = 'INSERT' then
-    perform public.notify((select author from public.posts where id = new.post_id), new.user_id, 'like', new.post_id);
-  else
-    delete from public.notifications where kind = 'like' and actor = old.user_id and post_id = old.post_id;
-  end if;
+  perform public.notify((select author from public.posts where id = new.post_id), new.user_id, 'like', new.post_id);
   return null;
 end $$;
-create or replace trigger post_likes_after after insert or delete on public.post_likes
+create or replace trigger post_likes_after after insert on public.post_likes
   for each row execute function public.post_likes_after();
 
 -- yorum: yanıtlar tek seviye, yazar sabit
@@ -625,15 +611,11 @@ create or replace function public.comment_likes_after() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare c record;
 begin
-  if tg_op = 'INSERT' then
-    select author, post_id, text into c from public.comments where id = new.comment_id;
-    perform public.notify(c.author, new.user_id, 'clike', c.post_id, new.comment_id, null, c.text);
-  else
-    delete from public.notifications where kind = 'clike' and actor = old.user_id and comment_id = old.comment_id;
-  end if;
+  select author, post_id, text into c from public.comments where id = new.comment_id;
+  perform public.notify(c.author, new.user_id, 'clike', c.post_id, new.comment_id, null, c.text);
   return null;
 end $$;
-create or replace trigger comment_likes_after after insert or delete on public.comment_likes
+create or replace trigger comment_likes_after after insert on public.comment_likes
   for each row execute function public.comment_likes_after();
 
 -- hikaye
@@ -661,14 +643,10 @@ create or replace trigger stories_after after insert on public.stories
 create or replace function public.story_likes_after() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if tg_op = 'INSERT' then
-    perform public.notify((select author from public.stories where id = new.story_id), new.user_id, 'slike', null, null, new.story_id);
-  else
-    delete from public.notifications where kind = 'slike' and actor = old.user_id and story_id = old.story_id;
-  end if;
+  perform public.notify((select author from public.stories where id = new.story_id), new.user_id, 'slike', null, null, new.story_id);
   return null;
 end $$;
-create or replace trigger story_likes_after after insert or delete on public.story_likes
+create or replace trigger story_likes_after after insert on public.story_likes
   for each row execute function public.story_likes_after();
 
 -- mesaj: sohbetin son mesajını ve okundu bilgisini güncelle
@@ -788,12 +766,6 @@ begin
   update public.threads set title = nullif(left(btrim(coalesce(p_title, '')), 60), '') where id = tid;
 end $$;
 
-create or replace function public.leave_thread(tid uuid) returns void
-language plpgsql security definer set search_path = public as $$
-begin
-  delete from public.thread_members where thread_id = tid and user_id = auth.uid();
-  if not exists (select 1 from public.thread_members where thread_id = tid) then delete from public.threads where id = tid; end if;
-end $$;
 
 -- yorum sabitleme (gönderi sahibi)
 create or replace function public.pin_comment(cid uuid, v boolean) returns void
@@ -980,8 +952,9 @@ create policy blocks_delete on public.blocks for delete to authenticated using (
 -- takip
 drop policy if exists follows_select on public.follows;
 create policy follows_select on public.follows for select to authenticated using (
-  follower = auth.uid() or following = auth.uid()
-  or (status = 'accepted' and (public.can_view(follower) or public.can_view(following)))
+  (follower = auth.uid() or following = auth.uid()
+   or (status = 'accepted' and (public.can_view(follower) or public.can_view(following))))
+  and not public.blocked_between(follower, following)
 );
 drop policy if exists follows_insert on public.follows;
 create policy follows_insert on public.follows for insert to authenticated with check (follower = auth.uid());
@@ -1075,6 +1048,8 @@ drop policy if exists thread_members_select on public.thread_members;
 create policy thread_members_select on public.thread_members for select to authenticated using (public.is_member(thread_id));
 drop policy if exists thread_members_update on public.thread_members;
 create policy thread_members_update on public.thread_members for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop policy if exists thread_members_delete on public.thread_members;
+create policy thread_members_delete on public.thread_members for delete to authenticated using (user_id = auth.uid());
 
 drop policy if exists messages_select on public.messages;
 create policy messages_select on public.messages for select to authenticated using (public.is_member(thread_id));
@@ -1096,7 +1071,10 @@ create policy reactions_delete on public.message_reactions for delete to authent
 
 -- bildirimler
 drop policy if exists notifications_select on public.notifications;
-create policy notifications_select on public.notifications for select to authenticated using (user_id = auth.uid());
+create policy notifications_select on public.notifications for select to authenticated using (
+  user_id = auth.uid() and not public.blocked_between(user_id, actor)
+  and public.notif_live(kind, actor, user_id, post_id, comment_id, story_id)
+);
 drop policy if exists notifications_update on public.notifications;
 create policy notifications_update on public.notifications for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 drop policy if exists notifications_delete on public.notifications;
@@ -1121,7 +1099,7 @@ revoke insert, delete on public.profiles from authenticated;
 revoke insert, update, delete on public.usernames, public.accounts, public.signup_log from authenticated;
 revoke select on public.usernames, public.signup_log from authenticated;
 revoke insert, update, delete on public.threads from authenticated;
-revoke insert, delete on public.thread_members from authenticated;
+revoke insert on public.thread_members from authenticated;
 revoke update on public.thread_members from authenticated;
 grant update (accepted, muted, last_read_at) on public.thread_members to authenticated;
 revoke update on public.messages from authenticated;
@@ -1141,9 +1119,9 @@ grant execute on function public.norm_phone(text), public.norm_email(text), publ
 grant execute on function
   public.blocked_between(uuid, uuid), public.blocked_me(uuid), public.can_view(uuid), public.is_close_friend_of(uuid),
   public.story_in_highlight(uuid, uuid), public.is_member(uuid), public.dm_blocked(uuid),
-  public.change_username(text), public.update_contact(text, text), public.delete_my_account(),
+  public.change_username(text), public.update_contact(text, text),
   public.start_dm(uuid), public.create_group(uuid[], text), public.add_group_members(uuid, uuid[]), public.rename_group(uuid, text),
-  public.leave_thread(uuid), public.pin_comment(uuid, boolean),
+  public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),

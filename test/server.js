@@ -254,6 +254,13 @@ const server = http.createServer(async (req, res) => {
         const r = await handleSignup(b, req.socket.remoteAddress + ':' + (req.headers['x-test-ip'] || ''));
         return sendJson(res, r.status, r.body);
       }
+      if (p === '/mock/functions/delete-account') { // supabase/functions/delete-account ile aynı: dosyalar + auth.admin.deleteUser
+        if (who.role !== 'authenticated' || !who.sub) return sendJson(res, 401, { error: 'not_authenticated' });
+        const names = await pool.one(`with d as (delete from storage.objects where bucket_id = 'media' and name like ${lit(who.sub + '/%')} returning name) select coalesce(json_agg(name), '[]') from d`);
+        (names || []).forEach((n) => { try { fs.unlinkSync(path.join(STORE, n)); fs.unlinkSync(path.join(STORE, n + '.type')); } catch (e) { /* yok */ } });
+        await pool.run(`delete from auth.users where id = ${lit(who.sub)}`);
+        return sendJson(res, 200, { ok: true });
+      }
       if (p === '/mock/storage/remove') {
         const names = await pool.one(`with d as (delete from storage.objects where bucket_id = 'media' and name in (${(b.paths || []).map(lit).join(',') || 'NULL'}) returning name) select coalesce(json_agg(name), '[]') from d`, 'authenticated', who.sub).catch(() => []);
         (names || []).forEach((n) => { try { fs.unlinkSync(path.join(STORE, n)); fs.unlinkSync(path.join(STORE, n + '.type')); } catch (e) { /* yok */ } });

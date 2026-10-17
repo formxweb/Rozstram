@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Ctx, useApp } from './ctx.js';
 import {
-  CONFIG, getClient, iso, rowComment, rowMessage, rowNotification, rowPost, rowProfile, rowStory, rowThread, toMs, uuid, errText, errCodeOf,
+  CONFIG, getClient, iso, rowComment, rowMessage, rowNotification, rowPost, rowProfile, rowStory, rowThread, toMs, uuid, errText, errCodeOf, functionError,
 } from './backend.js';
 import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo } from './lib.js';
 import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
@@ -171,6 +171,7 @@ function App() {
 
   const onDb = useCallback((table, ev, nw, old) => {
     const myId = meRef.current.id;
+    const dropNotifs = (pred) => setNotifs((l) => (l.some(pred) ? l.filter((n) => !pred(n)) : l));
     switch (table) {
       case 'profiles':
         if (ev === 'DELETE') setBase((m) => omit(m, old.id));
@@ -181,6 +182,9 @@ function App() {
         const k = r.follower + ':' + r.following;
         if (ev === 'DELETE') setFollows((m) => omit(m, k));
         else setFollows((m) => ({ ...m, [k]: { f: nw.follower, t: nw.following, s: nw.status, at: toMs(nw.created_at) } }));
+        if (r.following === myId && (ev === 'DELETE' || nw.status === 'accepted')) {
+          dropNotifs((n) => n.actor === r.follower && (n.kind === 'request' || (ev === 'DELETE' && n.kind === 'follow')));
+        }
         break;
       }
       case 'posts':
@@ -198,6 +202,7 @@ function App() {
           const likes = ev === 'DELETE' ? omit(p.likes, r.user_id) : { ...p.likes, [r.user_id]: toMs(nw.created_at) || Date.now() };
           return { ...m, [p.id]: { ...p, likes } };
         });
+        if (ev === 'DELETE') dropNotifs((n) => n.kind === 'like' && n.post === r.post_id && n.actor === r.user_id);
         break;
       }
       case 'comments':
@@ -212,6 +217,7 @@ function App() {
           const likes = ev === 'DELETE' ? omit(c.likes, r.user_id) : { ...c.likes, [r.user_id]: toMs(nw.created_at) || Date.now() };
           return { ...m, [c.id]: { ...c, likes } };
         });
+        if (ev === 'DELETE') dropNotifs((n) => n.kind === 'clike' && n.cid === r.comment_id && n.actor === r.user_id);
         break;
       }
       case 'stories':
@@ -229,6 +235,7 @@ function App() {
           const v = ev === 'DELETE' ? omit(s[key], who) : { ...s[key], [who]: toMs(nw.created_at) || Date.now() };
           return { ...m, [s.id]: { ...s, [key]: v } };
         });
+        if (ev === 'DELETE' && table === 'story_likes') dropNotifs((n) => n.kind === 'slike' && n.story === r.story_id && n.actor === r.user_id);
         break;
       }
       case 'threads':
@@ -591,9 +598,15 @@ function App() {
       title: nameOf(uid) + ' engellensin mi?', ok: 'Engelle', danger: true,
       text: 'Rozstram’da profilini, gönderilerini ve hikayelerini göremez, sana mesaj atamaz. Engellendiğini öğrenmez. Takipleşmeniz kalkar.',
       onOk: async () => {
+        await Promise.all([
+          sb.from('follows').delete().eq('follower', me.id).eq('following', uid),
+          sb.from('follows').delete().eq('follower', uid).eq('following', me.id),
+          sb.from('close_friends').delete().eq('owner', me.id).eq('friend', uid),
+        ]).catch(noop);
         const ok = await run(sb.from('blocks').insert({ blocker: me.id, blocked: uid }), 'Engellenemedi.');
         if (!ok) return;
         setBlocks((m) => ({ ...m, [uid]: true }));
+        setCloseFriends((m) => omit(m, uid));
         setFollows((m) => omit(omit(m, me.id + ':' + uid), uid + ':' + me.id));
         setStack((s) => s.filter((o) => !(o.type === 'user' && o.uid === uid)));
         toast(nameOf(uid) + ' engellendi');
@@ -873,7 +886,7 @@ function App() {
     run(sb.from('thread_members').update({ muted: v }).eq('thread_id', t.id).eq('user_id', me.id), 'Kaydedilemedi.');
   };
   const leaveThread = async (t) => {
-    const ok = await run(sb.rpc('leave_thread', { tid: t.id }), 'Sohbet silinemedi.');
+    const ok = await run(sb.from('thread_members').delete().eq('thread_id', t.id).eq('user_id', me.id), 'Sohbet silinemedi.');
     if (ok) { setThreads((m) => omit(m, t.id)); setStack((s) => s.filter((o) => !(o.type === 'chat' && o.tid === t.id) && !(o.type === 'groupinfo' && o.tid === t.id))); }
     return ok;
   };
@@ -974,9 +987,11 @@ function App() {
         if (data && data.length) await sb.storage.from('media').remove(data.map((x) => me.id + '/' + f + '/' + x.name));
       }
     } catch (e) { /* dosyalar silinemese de hesap silinir */ }
-    const ok = await run(sb.rpc('delete_my_account'), 'Hesap silinemedi.');
-    if (ok) { store.set('onboard:' + me.id, false); await sb.auth.signOut(); }
-    return ok;
+    const { data, error } = await sb.functions.invoke('delete-account', { body: {} });
+    if (error || !data || !data.ok) { const b = await functionError(error, data); toast(errText({ message: b && b.error }, 'Hesap silinemedi.')); return false; }
+    store.set('onboard:' + me.id, false);
+    await sb.auth.signOut();
+    return true;
   };
   const markActivitySeen = () => {
     if (!notifs.some((n) => !n.read)) return;

@@ -6,6 +6,7 @@ Instagram benzeri, gerçek kişilerle çalışan sosyal uygulama (PWA).
 - **Sunucu:** Supabase (Postgres + Auth + Realtime + Storage + Edge Function).
   - `supabase/schema.sql`: veritabanının tamamı (tablolar, güvenlik kuralları, tetikleyiciler).
   - `supabase/functions/signup`: kayıt fonksiyonu (e-posta veya telefon + kullanıcı adı).
+  - `supabase/functions/delete-account`: hesap silme (dosyalar + hesap; kullanıcı adı kilitli kalır).
 - **Ayar:** `config.json` (Supabase adresi + herkese açık anon anahtar).
 
 ## Yeniden derleme
