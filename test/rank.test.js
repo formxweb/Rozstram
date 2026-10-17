@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const out = '/var/tmp/rank.test.bundle.js';
 execFileSync('/opt/npm-tools/node_modules/.bin/esbuild', [path.join(__dirname, '../src/rank.js'), '--bundle', '--format=cjs', '--platform=node', '--outfile=' + out, '--log-level=error']);
-const { interestModel, scorePost, rankPosts } = require(out);
+const { interestModel, scorePost, rankPosts, rankWeights } = require(out);
 fs.unlinkSync(out);
 
 let n = 0;
@@ -96,5 +96,31 @@ const rankWith = (posts, model, ctx) => rankPosts(posts, (p) => scorePost(p, mod
   const a = post('a', 'takip', { likes: likes(5) }); const b = post('b', 'yeni', { likes: likes(5) });
   const m = interestModel({ me, posts: [a, b], following: ['takip'] });
   ok(rankWith([a, b], m, { discover: true, following: new Set(['takip']) })[0] === 'b', 'keşfette yeni hesaplar önde');
+}
+// 13) Yönetici: video ağırlığı artınca video öne geçer
+{
+  const a = post('a', 'k1', { likes: likes(4) }); const b = post('b', 'k2', { video: true, likes: likes(3) });
+  const m = interestModel({ me, posts: [a, b] });
+  ok(rankWith([b, a], m)[0] === 'a', 'normal ayarda daha beğenilen fotoğraf önde');
+  ok(rankWith([a, b], m, { weights: rankWeights({ video: 2 }) })[0] === 'b', 'video ağırlığı 2 iken video önde');
+}
+// 14) Yönetici: tazelik 0 iken eski ama çok beğenilen gönderi önde
+{
+  const a = post('a', 'k1', { likes: likes(2), age: 1 }); const b = post('b', 'k2', { likes: likes(40), age: 200 });
+  const m = interestModel({ me, posts: [a, b] });
+  ok(rankWith([b, a], m)[0] === 'a', 'normal ayarda yeni gönderi önde');
+  ok(rankWith([a, b], m, { weights: rankWeights({ fresh: 0 }) })[0] === 'b', 'tazelik 0 iken en beğenilen önde');
+}
+// 15) Yönetici: öne çıkarılan gönderi en üstte
+{
+  const a = post('a', 'k1', { likes: likes(30) }); const b = post('b', 'k2', { likes: likes(1), age: 20 });
+  b.boost = 5;
+  const m = interestModel({ me, posts: [a, b] });
+  ok(rankWith([a, b], m)[0] === 'b', 'öne çıkarılan gönderi en üstte');
+}
+// 16) Hatalı ağırlıklar varsayılana döner / sınırlanır
+{
+  const w = rankWeights({ video: 9, fresh: 'x', follow: -3 });
+  ok(w.video === 2 && w.fresh === 1 && w.follow === 0, 'ağırlıklar 0–2 arasında tutulur');
 }
 console.log('\nTAMAM:', n, 'algoritma testi');

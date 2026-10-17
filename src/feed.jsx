@@ -251,6 +251,7 @@ export function PostCard({ post, live }) {
 
   return (
     <article className="post" data-id={post.id}>
+      {post.removed ? <div className="removed-note"><Icon n="eyeOff" size={16} />Bu gönderi yönetici tarafından kaldırıldı. Sadece sen görebilirsin.</div> : null}
       <div className="post-head g">
         <div className="who">
           <Avatar uid={post.author} size={36} ring={app.storyRing(post.author)} onClick={() => (app.storyRing(post.author) ? app.openStories(post.author) : app.openUser(post.author))} />

@@ -70,6 +70,8 @@ export function SettingsScreen() {
         <Row icon="user" label="Hesap" sub="Kişisel bilgiler, şifre, hesabı silme" onClick={() => app.push({ type: 'account' })} />
         {app.incoming.length ? <Row icon="userPlus" label="Takip istekleri" sub={app.incoming.length + ' kişi bekliyor'} onClick={() => app.push({ type: 'requests' })} /> : null}
 
+        {app.isAdmin ? <Fragment><div className="set-head">Yönetim</div><Row icon="shield" label="Yönetici paneli" sub="Algoritma, öne çıkarma, şikayetler, mavi tik" onClick={() => app.push({ type: 'admin' })} /></Fragment> : null}
+
         <div className="set-head">Senin etkinliğin</div>
         <Row icon="bookmark" label="Kaydedilenler" sub={count(app.saved) + ' gönderi'} onClick={() => app.push({ type: 'grid', kind: 'saved', title: 'Kaydedilenler' })} />
         <Row icon="heart" label="Beğendiklerin" onClick={() => app.push({ type: 'grid', kind: 'liked', title: 'Beğendiklerin' })} />

@@ -50,6 +50,7 @@ export function ProfileScreen({ uid, isTab }) {
       ...(followsMe ? [{ label: 'Takipçilerimden çıkar', icon: 'userX', onClick: () => app.removeFollower(uid) }] : []),
       { label: app.blocks[uid] ? 'Engeli kaldır' : 'Engelle', icon: 'shield', danger: !app.blocks[uid], onClick: () => (app.blocks[uid] ? app.unblock(uid) : app.block(uid)) },
       { label: 'Şikayet et', icon: 'flag', danger: true, onClick: () => app.openReport('user', uid) },
+      ...(app.isAdmin ? [{ label: (app.profiles[uid] && app.profiles[uid].verified ? 'Mavi tiki kaldır' : 'Mavi tik ver') + ' (Yönetici)', icon: 'verified', onClick: () => app.admin.verify(uid, !(app.profiles[uid] && app.profiles[uid].verified)) }] : []),
     ],
   });
 

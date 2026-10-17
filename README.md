@@ -16,6 +16,14 @@ izleme, takip, yakın arkadaş, mesajlaşma), ilgilendiğin #etiketler, video/fo
 takipçi sayısına göre başarısı, tazelik, "İlgilenmiyorum" sinyalleri ve çeşitlilik. Ağırlıklar dosyanın
 başındaki `W` ve `scorePost` içindedir.
 
+## Yönetici paneli
+
+Ayarlar → Yönetim → Yönetici paneli (sadece `app_admins` tablosundaki hesaplar görür).
+Genel bakış, algoritma ağırlıkları, şikayetler (gönderiyi kaldır / görmezden gel), öne çıkanlar ve
+mavi tik. Gönderiyi öne çıkarmak için gönderinin ••• menüsü → "Öne çıkar (Yönetici)".
+Yeni yönetici eklemek: Supabase SQL Editor'de
+`insert into public.app_admins (user_id) select id from public.profiles where username = 'KULLANICI_ADI';`
+
 ## Yeniden derleme
 
 ```
@@ -29,4 +37,5 @@ python3 build.py --test   # yerel test sunucusuna bağlı derleme
 bash supabase/test/run.sh        # veritabanı testleri (yerel Postgres)
 bash test/restart.sh && node test/e2e.js && STEP0=40 node test/e2e2.js   # tarayıcı testleri
 node test/rank.test.js           # akış algoritması testleri
+node test/admin-e2e.js           # yönetici paneli testi
 ```

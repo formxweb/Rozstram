@@ -261,6 +261,45 @@ select t.as_user('00000000-0000-0000-0000-00000000000d');
 select t.ok(public.view_post('10000000-0000-0000-0000-0000000000f3') = true, 'takipçi gizli hesabın videosunu izleyince sayılır');
 select t.as_user('00000000-0000-0000-0000-00000000000a');
 
+-- ------------------------------------------------------------------ yönetici
+\echo '== yönetici'
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.err($q$select public.admin_overview()$q$, 'not_allowed', 'yönetici olmayan paneli açamaz');
+select t.err($q$select public.admin_set_rank('{"video":2}')$q$, 'not_allowed', 'yönetici olmayan algoritmayı değiştiremez');
+select t.err($q$select public.admin_boost_post('10000000-0000-0000-0000-0000000000f1', 5, 3)$q$, 'not_allowed', 'yönetici olmayan öne çıkaramaz');
+select t.err($q$insert into public.app_settings (key, value) values ('rank', '{}')$q$, 'permission denied|row-level', 'ayarlar doğrudan yazılamaz');
+select t.err($q$update public.profiles set verified = true where id = auth.uid()$q$, 'permission denied', 'kimse kendine mavi tik veremez');
+reset role;
+insert into public.app_admins (user_id) values ('00000000-0000-0000-0000-00000000000b');
+set role authenticated;
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.ok(public.is_admin(), 'bob yönetici');
+select t.ok((public.admin_overview() ->> 'users')::int >= 4, 'genel bakış sayıları');
+select t.ok(public.admin_set_rank('{"video":3,"fresh":"x","follow":0.5}') = '{"video":2,"follow":0.5}'::jsonb, 'ağırlıklar 0-2 arasına sınırlandı, hatalı değer atlandı');
+select public.admin_boost_post('10000000-0000-0000-0000-0000000000f1', 3, 2);
+select t.ok(public.boost_of('10000000-0000-0000-0000-0000000000f1') = 3, 'gönderi öne çıkarıldı');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((select (value ->> 'video')::numeric from public.app_settings where key = 'rank') = 2, 'herkes algoritma ayarını okur');
+select t.ok((public.get_posts(array['10000000-0000-0000-0000-0000000000f1'::uuid]) -> 'posts' -> 0 ->> 'boost')::numeric = 3, 'öne çıkarma gönderide görünür');
+select t.ok((public.bootstrap() ->> 'isAdmin')::boolean = false, 'dave yönetici değil');
+insert into public.reports (kind, target, reason) values ('post', '10000000-0000-0000-0000-0000000000f3', 'spam');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000f3') = 1, 'kaldırılmadan önce dave görür');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.ok(jsonb_array_length(public.admin_reports()) >= 1, 'şikayet yöneticiye düştü');
+select public.admin_remove_post('10000000-0000-0000-0000-0000000000f3', 'spam');
+select t.ok((public.admin_overview() ->> 'openReports')::int = 0, 'kaldırınca şikayet kapandı');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000f3') = 0, 'kaldırılan gönderiyi başkası görmez');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.ok((public.get_posts(array['10000000-0000-0000-0000-0000000000f3'::uuid]) -> 'posts' -> 0 ->> 'removed')::boolean, 'sahibi kaldırıldığını görür');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select public.admin_restore_post('10000000-0000-0000-0000-0000000000f3');
+select public.admin_set_verified('00000000-0000-0000-0000-00000000000d', true);
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000f3') = 1, 'geri getirilen gönderi yine görünür');
+select t.ok((select verified from public.profiles where id = auth.uid()), 'yönetici mavi tik verdi');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
 reset role;

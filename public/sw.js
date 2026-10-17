@@ -1,6 +1,6 @@
 /* Rozstram service worker — uygulama kabuğunu önbelleğe alır */
-const V = 'roz-6c4af75861';
-const SHELL = ['/', '/assets/app-1c4c4b72cf.js', '/assets/app-65723269da.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const V = 'roz-838611628a';
+const SHELL = ['/', '/assets/app-8d3de48fd0.js', '/assets/app-dfefc80e13.css', '/manifest.webmanifest', '/icons/icon-192.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V && k.indexOf('roz-') === 0).map((k) => caches.delete(k)))).then(() => self.clients.claim()));

@@ -69,6 +69,8 @@ export function rowPost(r, prev) {
     pinned: !!r.pinned, archived: !!r.archived, at: toMs(r.created_at), edited: r.edited_at ? toMs(r.edited_at) : null,
     likes: (prev && prev.likes) || {},
     views: (prev && prev.views) || 0,
+    boost: (prev && prev.boost) || 0,
+    removed: !!(prev && prev.removed),
   };
 }
 

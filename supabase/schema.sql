@@ -256,7 +256,8 @@ create table if not exists public.reports (
   kind       text not null check (kind in ('user', 'post', 'comment', 'story', 'message')),
   target     text not null,
   reason     text check (char_length(reason) <= 500),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
 );
 
 -- =====================================================================
@@ -809,6 +810,168 @@ begin
 end $$;
 
 -- =====================================================================
+-- 5b) YÖNETİCİ (öne çıkarma, algoritma ayarı, şikayetler, mavi tik)
+-- =====================================================================
+
+-- Yöneticiler (uygulamadan değiştirilemez; sadece veritabanından eklenir)
+create table if not exists public.app_admins (
+  user_id    uuid primary key references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+-- Uygulama ayarları (ör. akış algoritmasının ağırlıkları). Herkes okur, sadece yönetici yazar.
+create table if not exists public.app_settings (
+  key        text primary key,
+  value      jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+-- Öne çıkarılan gönderiler
+create table if not exists public.post_boosts (
+  post_id    uuid primary key references public.posts (id) on delete cascade,
+  weight     numeric not null check (weight >= 0 and weight <= 10),
+  until      timestamptz not null,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- Yöneticinin kaldırdığı gönderiler (sahibi dışında kimse göremez)
+create table if not exists public.post_removals (
+  post_id    uuid primary key references public.posts (id) on delete cascade,
+  active     boolean not null default true,
+  reason     text check (char_length(reason) <= 300),
+  removed_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.reports add column if not exists resolved_at timestamptz;
+
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.app_admins where user_id = auth.uid());
+$$;
+
+create or replace function public.boost_of(pid uuid) returns numeric
+language sql stable security definer set search_path = public as $$
+  select coalesce((select weight from public.post_boosts where post_id = pid and until > now()), 0);
+$$;
+
+create or replace function public.post_removed(pid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.post_removals where post_id = pid and active);
+$$;
+
+create or replace function public.admin_check() returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'not_allowed'; end if;
+end $$;
+
+-- Genel bakış
+create or replace function public.admin_overview() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  return jsonb_build_object(
+    'users', (select count(*) from public.profiles),
+    'usersToday', (select count(*) from public.profiles where created_at > now() - interval '24 hours'),
+    'posts', (select count(*) from public.posts),
+    'postsToday', (select count(*) from public.posts where created_at > now() - interval '24 hours'),
+    'stories', (select count(*) from public.stories where created_at > now() - interval '24 hours'),
+    'messagesToday', (select count(*) from public.messages where created_at > now() - interval '24 hours'),
+    'views', (select count(*) from public.post_views),
+    'openReports', (select count(*) from public.reports where resolved_at is null),
+    'boosts', coalesce((select jsonb_agg(jsonb_build_object('post', b.post_id, 'weight', b.weight, 'until', public.ms(b.until)) order by b.created_at desc)
+                        from public.post_boosts b where b.until > now()), '[]'::jsonb),
+    'removed', coalesce((select jsonb_agg(jsonb_build_object('post', r.post_id, 'reason', r.reason, 'at', public.ms(r.created_at)) order by r.created_at desc)
+                         from public.post_removals r where r.active), '[]'::jsonb)
+  );
+end $$;
+
+-- Açık şikayetler (önizlemeleriyle)
+create or replace function public.admin_reports() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  return coalesce((select jsonb_agg(x order by (x ->> 'at')::bigint desc) from (
+    select jsonb_build_object(
+      'id', r.id, 'kind', r.kind, 'target', r.target, 'reason', r.reason, 'at', public.ms(r.created_at), 'reporter', r.reporter,
+      'count', (select count(*) from public.reports r2 where r2.kind = r.kind and r2.target = r.target and r2.resolved_at is null),
+      'preview', case r.kind
+        when 'post' then (select jsonb_build_object('author', p.author, 'caption', p.caption, 'media', p.media, 'removed', public.post_removed(p.id))
+                          from public.posts p where p.id::text = r.target)
+        when 'user' then (select jsonb_build_object('author', p.id, 'caption', p.bio) from public.profiles p where p.id::text = r.target)
+        when 'comment' then (select jsonb_build_object('author', c.author, 'caption', c.text, 'post', c.post_id) from public.comments c where c.id::text = r.target)
+        when 'story' then (select jsonb_build_object('author', s.author, 'media', s.media) from public.stories s where s.id::text = r.target)
+        when 'message' then (select jsonb_build_object('author', m.sender, 'caption', m.text) from public.messages m where m.id::text = r.target)
+      end
+    ) as x
+    from public.reports r where r.resolved_at is null
+    order by r.created_at desc limit 200
+  ) q), '[]'::jsonb);
+end $$;
+
+create or replace function public.admin_resolve_report(rid bigint) returns void
+language plpgsql security definer set search_path = public as $$
+declare k text; t text;
+begin
+  perform public.admin_check();
+  select kind, target into k, t from public.reports where id = rid;
+  update public.reports set resolved_at = now() where kind = k and target = t and resolved_at is null;
+end $$;
+
+-- Gönderiyi kaldır / geri getir
+create or replace function public.admin_remove_post(pid uuid, p_reason text default null) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  insert into public.post_removals (post_id, active, reason, removed_by) values (pid, true, left(p_reason, 300), auth.uid())
+  on conflict (post_id) do update set active = true, reason = excluded.reason, removed_by = excluded.removed_by, created_at = now();
+  update public.reports set resolved_at = now() where kind = 'post' and target = pid::text and resolved_at is null;
+end $$;
+
+create or replace function public.admin_restore_post(pid uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.post_removals set active = false where post_id = pid;
+end $$;
+
+-- Öne çıkar (weight 0 = öne çıkarmayı bitir)
+create or replace function public.admin_boost_post(pid uuid, p_weight numeric, p_days int default 3) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  if not exists (select 1 from public.posts where id = pid) then raise exception 'not_found'; end if;
+  insert into public.post_boosts (post_id, weight, until, created_by)
+  values (pid, greatest(0, least(10, coalesce(p_weight, 0))), case when coalesce(p_weight, 0) > 0 then now() + make_interval(days => greatest(1, least(30, coalesce(p_days, 3)))) else now() end, auth.uid())
+  on conflict (post_id) do update set weight = excluded.weight, until = excluded.until, created_by = excluded.created_by, created_at = now();
+end $$;
+
+-- Algoritma ağırlıkları: her biri 0 ile 2 arası (1 = normal)
+create or replace function public.admin_set_rank(v jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare k text; out jsonb := '{}'::jsonb; n numeric;
+begin
+  perform public.admin_check();
+  foreach k in array array['video', 'follow', 'fresh', 'popular', 'newcomer', 'interest'] loop
+    begin n := (v ->> k)::numeric; exception when others then n := null; end;
+    if n is not null then out := out || jsonb_build_object(k, round(greatest(0, least(2, n)), 2)); end if;
+  end loop;
+  insert into public.app_settings (key, value, updated_at) values ('rank', out, now())
+  on conflict (key) do update set value = excluded.value, updated_at = now();
+  return out;
+end $$;
+
+-- Mavi tik
+create or replace function public.admin_set_verified(uid uuid, v boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.profiles set verified = coalesce(v, false) where id = uid;
+end $$;
+
+-- =====================================================================
 -- 6) VERİ OKUMA (tek seferde açılış verisi)
 -- =====================================================================
 
@@ -819,7 +982,8 @@ language sql stable as $$
     'filter', p.filter, 'adjust', p.adjust, 'tagged', to_jsonb(p.tagged), 'hideLikes', p.hide_likes, 'noComments', p.comments_off,
     'pinned', p.pinned, 'archived', p.archived, 'at', public.ms(p.created_at), 'edited', case when p.edited_at is null then null else public.ms(p.edited_at) end,
     'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb),
-    'views', public.view_count(p.id)
+    'views', public.view_count(p.id),
+    'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id)
   );
 $$;
 
@@ -892,6 +1056,8 @@ language sql stable set search_path = public as $$
     'mutes', coalesce((select jsonb_agg(m.target) from public.mutes m where m.owner = auth.uid()), '[]'::jsonb),
     'closeFriends', coalesce((select jsonb_agg(c.friend) from public.close_friends c where c.owner = auth.uid()), '[]'::jsonb),
     'viewed', public.my_views(),
+    'isAdmin', public.is_admin(),
+    'settings', coalesce((select jsonb_object_agg(s.key, s.value) from public.app_settings s), '{}'::jsonb),
     'notifications', coalesce((select jsonb_agg(x) from (
         select jsonb_build_object('id', n.id, 'kind', n.kind, 'actor', n.actor, 'post', n.post_id, 'cid', n.comment_id, 'story', n.story_id,
                                   'text', n.text, 'at', public.ms(n.created_at), 'read', n.read_at is not null) x
@@ -972,6 +1138,12 @@ alter table public.messages          enable row level security;
 alter table public.message_reactions enable row level security;
 alter table public.notifications     enable row level security;
 alter table public.reports           enable row level security;
+alter table public.app_admins        enable row level security;
+alter table public.app_settings      enable row level security;
+alter table public.post_boosts       enable row level security;
+alter table public.post_removals     enable row level security;
+drop policy if exists app_settings_select on public.app_settings;
+create policy app_settings_select on public.app_settings for select to authenticated using (true);
 
 -- profiller: herkes görür (seni engelleyenler hariç), sadece kendin düzenlersin
 drop policy if exists profiles_select on public.profiles;
@@ -1016,7 +1188,9 @@ create policy hidden_all on public.hidden_posts for all to authenticated using (
 
 -- gönderiler
 drop policy if exists posts_select on public.posts;
-create policy posts_select on public.posts for select to authenticated using (author = auth.uid() or (not archived and public.can_view(author)));
+create policy posts_select on public.posts for select to authenticated using (
+  author = auth.uid() or (not archived and public.can_view(author) and not public.post_removed(id))
+);
 drop policy if exists posts_insert on public.posts;
 create policy posts_insert on public.posts for insert to authenticated with check (author = auth.uid());
 drop policy if exists posts_update on public.posts;
@@ -1152,6 +1326,8 @@ revoke update on public.comments from authenticated;
 revoke update on public.stories from authenticated;
 revoke select, update, delete on public.reports from authenticated;
 revoke all on public.post_views from authenticated;
+revoke all on public.app_admins, public.post_boosts, public.post_removals from authenticated;
+revoke insert, update, delete on public.app_settings from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1164,6 +1340,9 @@ grant execute on function
   public.change_username(text), public.update_contact(text, text),
   public.start_dm(uuid), public.create_group(uuid[], text), public.add_group_members(uuid, uuid[]), public.rename_group(uuid, text),
   public.notif_live(text, uuid, uuid, uuid, uuid, uuid), public.pin_comment(uuid, boolean), public.view_post(uuid), public.view_count(uuid), public.my_views(),
+  public.is_admin(), public.boost_of(uuid), public.post_removed(uuid), public.admin_check(), public.admin_overview(), public.admin_reports(),
+  public.admin_resolve_report(bigint), public.admin_remove_post(uuid, text), public.admin_restore_post(uuid),
+  public.admin_boost_post(uuid, numeric, int), public.admin_set_rank(jsonb), public.admin_set_verified(uuid, boolean),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
   public.bootstrap(), public.get_posts(uuid[]), public.user_posts(uuid), public.get_stories(uuid[]), public.get_thread(uuid),
@@ -1230,3 +1409,6 @@ alter function public.profile_json(public.profiles) set search_path = public;
 alter function public.thread_json(public.threads) set search_path = public;
 alter function public.message_json(public.messages) set search_path = public;
 alter function public.msg_preview(public.messages) set search_path = public;
+
+-- algoritma ayarı satırı (boş = varsayılan ağırlıklar)
+insert into public.app_settings (key, value) values ('rank', '{}'::jsonb) on conflict (key) do nothing;

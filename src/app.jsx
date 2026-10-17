@@ -6,7 +6,8 @@ import {
 } from './backend.js';
 import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo } from './lib.js';
 import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
-import { interestModel, isVideo, rankPosts, scorePost } from './rank.js';
+import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
+import { AdminScreen } from './admin.jsx';
 import { HomeScreen, CommentsSheet, LikesSheet, SendSheet, PostScreen, PeekModal } from './feed.jsx';
 import { ReelsScreen } from './reels.jsx';
 import { StoryViewer } from './stories.jsx';
@@ -42,6 +43,8 @@ function App() {
   const [account, setAccount] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [viewed, setViewed] = useState({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [settings, setSettings] = useState({});
   const [rankEpoch, setRankEpoch] = useState(0);
   const [conn, setConn] = useState('ok');
   const [peers, setPeers] = useState({});
@@ -143,6 +146,8 @@ function App() {
     setNotifs(data.notifications || []);
     setAccount(data.account || null);
     setViewed(flag(data.viewed));
+    setIsAdmin(!!data.isAdmin);
+    setSettings(data.settings || {});
     setRankEpoch((e) => e + 1);
     setLoaded(true);
     return true;
@@ -379,7 +384,7 @@ function App() {
     if (c.epoch !== rankEpoch) { c.epoch = rankEpoch; c.now = Date.now(); c.s = {}; }
     const key = (discover ? 'd:' : '') + p.id;
     if (c.s[key] == null) {
-      c.s[key] = scorePost(p, interest, { me: me.id, now: c.now, commentCount, followerCount, viewed, following, discover: !!discover });
+      c.s[key] = scorePost(p, interest, { me: me.id, now: c.now, commentCount, followerCount, viewed, following, discover: !!discover, weights: rankWeights(settings.rank) });
     }
     return c.s[key];
   }, [rankEpoch, interest]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1027,6 +1032,45 @@ function App() {
   };
   const finishOnboarding = () => { store.set('onboard:' + me.id, false); setOnboarding(false); };
 
+  /* ------------------------------------------------ yönetici */
+  const adminRpc = async (fn, args, okText) => {
+    const { data, error } = await sb.rpc(fn, args || {});
+    if (error) { toast(errText(error, 'Yapılamadı.')); return null; }
+    if (okText) toast(okText);
+    return data === null ? true : data;
+  };
+  const mergePost = (id, o) => patchPost(id, (p) => ({ ...p, ...o }));
+  const admin = {
+    overview: () => adminRpc('admin_overview'),
+    reports: () => adminRpc('admin_reports'),
+    resolve: (id) => adminRpc('admin_resolve_report', { rid: id }, 'Şikayet kapatıldı'),
+    boost: async (post, days) => {
+      const ok = await adminRpc('admin_boost_post', { pid: post.id, p_weight: days ? 5 : 0, p_days: days || 1 }, days ? 'Gönderi ' + days + ' gün öne çıkarıldı' : 'Öne çıkarma bitirildi');
+      if (ok) { mergePost(post.id, { boost: days ? 5 : 0 }); scoreCache.current.epoch = -1; setRankEpoch((e) => e + 1); }
+      return ok;
+    },
+    remove: async (post, reason) => {
+      const ok = await adminRpc('admin_remove_post', { pid: post.id, p_reason: reason || null }, 'Gönderi kaldırıldı');
+      if (ok) { if (post.author === me.id) mergePost(post.id, { removed: true }); else setPosts((m) => omit(m, post.id)); }
+      return ok;
+    },
+    restore: async (id) => {
+      const ok = await adminRpc('admin_restore_post', { pid: id }, 'Gönderi geri getirildi');
+      if (ok) { const { data } = await sb.rpc('get_posts', { ids: [id] }); mergeFetched(data); }
+      return ok;
+    },
+    verify: async (uid, v) => {
+      const ok = await adminRpc('admin_set_verified', { uid, v }, v ? 'Mavi tik verildi' : 'Mavi tik kaldırıldı');
+      if (ok) patchBase(uid, (p) => ({ ...p, verified: !!v }));
+      return ok;
+    },
+    setRank: async (w) => {
+      const data = await adminRpc('admin_set_rank', { v: w }, 'Algoritma ayarları kaydedildi');
+      if (data) { setSettings((s) => ({ ...s, rank: data })); scoreCache.current.epoch = -1; setRankEpoch((e) => e + 1); }
+      return data;
+    },
+  };
+
   /* ------------------------------------------------ eksik veriyi getir */
   const mergeFetched = (d) => {
     if (!d) return;
@@ -1123,6 +1167,11 @@ function App() {
     }
     items.push({ label: 'Profile git', icon: 'user', onClick: () => openUser(post.author) });
     if (!mine) items.push({ label: 'Şikayet et', icon: 'flag', danger: true, onClick: () => openReport('post', post.id) });
+    if (isAdmin) {
+      if (post.boost > 0) items.push({ label: 'Öne çıkarmayı bitir (Yönetici)', icon: 'flame', onClick: () => admin.boost(post, 0) });
+      else items.push({ label: 'Öne çıkar (Yönetici)', icon: 'flame', onClick: () => setSheet({ title: 'Ne kadar süre öne çıksın?', items: [1, 3, 7].map((d) => ({ label: d + ' gün', icon: 'clock', onClick: () => admin.boost(post, d) })) }) });
+      if (!mine) items.push({ label: 'Gönderiyi kaldır (Yönetici)', icon: 'trash', danger: true, onClick: () => confirm({ title: 'Gönderi kaldırılsın mı?', text: 'Sahibi dışında kimse göremez. Yönetici panelinden geri getirebilirsin.', ok: 'Kaldır', danger: true, onOk: () => admin.remove(post, 'Yönetici kaldırdı') }) });
+    }
     if (mine) items.push({ label: 'Sil', icon: 'trash', danger: true, onClick: () => confirm({ title: 'Gönderi silinsin mi?', ok: 'Sil', danger: true, onOk: () => deletePost(post) }) });
     setSheet({ items });
   };
@@ -1150,7 +1199,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    viewPost, rankList, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, rankList, isAdmin, admin, settings, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,
@@ -1182,6 +1231,7 @@ function App() {
     else if (o.type === 'groupinfo') body = <GroupInfoScreen tid={o.tid} />;
     else if (o.type === 'edit') body = <EditProfileScreen />;
     else if (o.type === 'settings') body = <SettingsScreen />;
+    else if (o.type === 'admin') body = <AdminScreen />;
     else if (o.type === 'account') body = <AccountScreen />;
     else if (o.type === 'plist') body = <PeopleListScreen kind={o.kind} />;
     else if (o.type === 'grid') body = <GridScreen kind={o.kind} title={o.title} />;

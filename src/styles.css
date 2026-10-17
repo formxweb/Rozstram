@@ -789,3 +789,44 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .onboard-av img { width: 128px; height: 128px; border-radius: 50%; object-fit: cover; }
 .onboard-av .plus { position: absolute; right: 2px; bottom: 6px; width: 36px; height: 36px; border-radius: 50%; background: var(--grad); color: #fff; display: grid; place-items: center; border: 3px solid var(--bg); }
 .onboard-list { max-height: 46vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; padding-inline: 12px; }
+
+/* ---------------------------------------------------------------- yönetici paneli */
+.adm-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 10px 16px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.adm-tabs::-webkit-scrollbar { display: none; }
+.adm-tabs button { flex: none; padding: 8px 14px; border-radius: 999px; background: var(--soft); font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.adm-tabs button.on { background: var(--fg); color: var(--bg); }
+.adm-tabs .dot { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--like); color: #fff; font-size: 11px; display: inline-grid; place-items: center; }
+.adm { padding-bottom: 32px; }
+.center-pad { display: grid; place-items: center; padding: 48px 0; }
+.adm-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 14px; }
+.adm-stat { background: var(--soft); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 2px; }
+.adm-stat b { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.adm-stat span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.adm-stat i { font-style: normal; font-size: 12px; color: #1fbf5a; font-weight: 700; }
+.adm-note { font-size: 13.5px; color: var(--muted); line-height: 1.45; padding-block: 14px 4px; }
+.adm-slider { padding-block: 12px; border-bottom: 1px solid var(--line); }
+.adm-slider .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.adm-slider .lvl { font-size: 13px; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+.adm-slider .lvl.on { color: var(--link); }
+.adm-slider input[type=range] { width: 100%; margin: 10px 0 4px; accent-color: var(--link); }
+.adm-slider .sub { font-size: 12.5px; color: var(--muted); }
+.adm-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 12px; }
+.adm-actions .btn { flex: 1 1 auto; }
+.adm-card { border: 1px solid var(--line); border-radius: 16px; padding: 12px; margin-top: 12px; }
+.adm-card .row { display: flex; align-items: center; gap: 6px; }
+.adm-card .pill { font-size: 12px; font-weight: 800; padding: 3px 9px; border-radius: 999px; background: var(--soft); color: var(--fg); }
+.adm-card .pill.warn { background: rgba(237, 73, 86, .12); color: var(--like); }
+.adm-card .when { margin-left: auto; font-size: 12px; color: var(--muted); }
+.adm-card .reason { font-size: 14px; margin-top: 8px; color: var(--muted); }
+.adm-card .pv { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+.adm-card .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.adm-card .grow b { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; }
+.adm-card .grow span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.adm-card.row-card { display: flex; align-items: center; gap: 10px; }
+.adm-card.row-card .btn { flex: none; }
+.adm-thumb { width: 52px; height: 52px; border-radius: 10px; background: var(--soft); overflow: hidden; flex: none; display: grid; place-items: center; color: var(--muted); }
+.adm-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.adm-empty { font-size: 14px; color: var(--muted); padding-block: 10px; }
+.adm-search { display: flex; align-items: center; gap: 8px; background: var(--soft); border-radius: 12px; padding: 0 12px; margin-top: 14px; color: var(--muted); }
+.adm-search input { flex: 1; border: 0; background: none; padding: 11px 0; font-size: 15px; color: var(--fg); outline: none; }
+.removed-note { display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--like); background: rgba(237, 73, 86, .08); padding: 8px 12px; }
