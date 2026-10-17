@@ -392,9 +392,13 @@ function App() {
   }, [rankEpoch, interest]); // eslint-disable-line react-hooks/exhaustive-deps
   const rankList = useCallback((list, discover) => rankPosts(list, (p) => scoreOf(p, discover)), [scoreOf]);
 
+  // az önce paylaştığın gönderi/Reels en üstte görünür (Instagram'daki gibi)
+  const justShared = (p) => p.author === me.id && Date.now() - p.at < 10 * 60e3;
+  const ownFirst = (list, ranked) => list.filter(justShared).sort((a, b) => b.at - a.at).concat(ranked(list.filter((p) => !justShared(p))));
+
   const feed = useMemo(() => {
     const vis = visiblePosts.filter((p) => !hidden[p.id] && !mutes[p.author]);
-    if (feedMode === 'foryou') return { main: rankList(vis), rest: [] };
+    if (feedMode === 'foryou') return { main: ownFirst(vis, rankList), rest: [] };
     const mine = (p) => p.author === me.id || following.has(p.author);
     return { main: vis.filter(mine), rest: rankList(vis.filter((p) => !mine(p)), true) };
   }, [visiblePosts, hidden, mutes, feedMode, following, me.id, rankList]);
@@ -402,7 +406,7 @@ function App() {
   const reelsFor = useCallback((mode) => {
     const vids = visiblePosts.filter((p) => isVideo(p) && !hidden[p.id] && !mutes[p.author]);
     if (mode === 'following') return vids.filter((p) => following.has(p.author) || p.author === me.id);
-    return rankList(vids);
+    return ownFirst(vids, rankList);
   }, [visiblePosts, hidden, mutes, following, me.id, rankList]);
 
   const isSeen = useCallback((s) => !!(seenLocal[s.id] || (s.views && s.views[me.id]) || s.author === me.id && seenLocal[s.id]), [seenLocal, me.id]);
