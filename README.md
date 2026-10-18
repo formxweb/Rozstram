@@ -29,6 +29,30 @@ kabul edilir (ban kalkar) ya da reddedilir. Yönetici kendini ya da başka bir y
 Yeni yönetici eklemek: Supabase SQL Editor'de
 `insert into public.app_admins (user_id) select id from public.profiles where username = 'KULLANICI_ADI';`
 
+## Güvenlik ve yaş
+
+- Kayıtta doğum yılı sorulur; 13 yaş altı kayıt olamaz. Doğum yılı olmayan eski hesaplara uygulama bir kez sorar.
+- 18 yaş altı (genç hesap): hesap gizli başlar, hassas içerik hep gizli kalır, sadece takip ettiği kişiler yeni sohbet başlatabilir,
+  Renkli tema ve çıkartmalı yıl özeti varsayılan olur. Başkasının yaşı hiçbir yoldan sorgulanamaz.
+- Hassas içerik: gönderi oluştururken ya da ••• menüsünden işaretlenir (yönetici de işaretleyebilir, sahibi bu işareti kaldıramaz).
+  Ayarlar → Hassas içerik: Göster / Bulanık / Gizle.
+
+## Şipşak
+
+Mesajlar → Şipşak çek: kamera açılır, çekilen foto filtresiz anında gider (karşılıklı takipleşilen arkadaşlar ya da Yakın Arkadaşlar).
+Alıcı bir kez görür, tepki bırakabilir; 24 saatte kaybolur. Gönderen kimin gördüğünü ve tepkiyi görür, geri alabilir.
+
+## Uçtan uca şifreli sohbet
+
+Profil ••• → Şifreli sohbet. Her cihaz kendi anahtarını üretir (gizli anahtar cihazdan çıkmaz, `device_keys`
+tablosunda sadece açık anahtar durur). Mesajlar AES-GCM ile şifrelenir, anahtar her cihaz için ECDH ile sarılır; sunucu sadece
+şifreli içeriği saklar. Sohbet bilgisinde iki tarafta aynı çıkan güvenlik kodu var. Şimdilik yazı ve emoji; yeni bir cihaz eski mesajları açamaz.
+
+## Yıl özeti ve en sevdiğin yıl
+
+Ayarlar → Yıl özetin (15 Aralık–31 Ocak arası akışta kart olarak da çıkar): paylaşımlar, beğeniler, en sevilen gönderi,
+etiketler, yeni takipçiler ve "En sevdiğin yıl" (X yıl geçmiş, vay be! → kışı mı yazı mı) → hikayede paylaş.
+
 ## Müzik
 
 Hikaye, Reels ve gönderilere müzik eklenebilir. Hazır kütüphane `music/` klasöründedir ve
@@ -51,4 +75,5 @@ node test/rank.test.js           # akış algoritması testleri
 node test/admin-e2e.js           # yönetici paneli testi
 node test/music-e2e.js           # müzik testi
 node test/ban-e2e.js             # banlama testi
+node test/features-e2e.js        # yaş, hassas içerik, Şipşak, şifreli sohbet, yıl özeti
 ```

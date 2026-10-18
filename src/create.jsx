@@ -41,6 +41,7 @@ export function CreateFlow({ mode: initialMode, music: initialMusic, onDone }) {
   const [location, setLocation] = useState('');
   const [hideLikes, setHideLikes] = useState(false);
   const [noComments, setNoComments] = useState(false);
+  const [sensitive, setSensitive] = useState(false);
   const [tagged, setTagged] = useState([]);
   const [tagOpen, setTagOpen] = useState(false);
   const camRef = useRef(null);
@@ -107,7 +108,7 @@ export function CreateFlow({ mode: initialMode, music: initialMusic, onDone }) {
     setProgress(0);
     const asp = ASPECTS.find((a) => a.id === aspect);
     const ok = await app.publish({
-      mode, items, filter, adjust, caption: caption.trim(), location: location.trim(), hideLikes, noComments, aspect: asp ? asp.v : null,
+      mode, items, filter, adjust, caption: caption.trim(), location: location.trim(), hideLikes, noComments, sensitive, aspect: asp ? asp.v : null,
       overlay: overlay && overlay.text ? overlay : null, textStory: step === 'text' ? textStory : null, tagged, closeFriends: closeFriends === true, music,
     }, (p) => setProgress(p));
     if (ok) {
@@ -290,6 +291,7 @@ export function CreateFlow({ mode: initialMode, music: initialMusic, onDone }) {
             <button className="opt-row" onClick={() => setTagOpen(true)}><Icon n="user" size={22} /><span className="grow"><span>Kişileri etiketle</span>{tagged.length ? <span className="sub">{tagged.map((u) => '@' + app.nameOf(u)).join(', ')}</span> : null}</span><Icon n="chevRight" size={18} /></button>
             <div className="opt-row"><Icon n="eyeOff" size={22} /><span className="grow"><span>Beğeni sayısını gizle</span><span className="sub">Beğeni sayısını sadece sen görürsün.</span></span><Toggle id="opt-hide" on={hideLikes} onChange={setHideLikes} label="Beğeni sayısını gizle" /></div>
             <div className="opt-row"><Icon n="comment" size={22} /><span className="grow"><span>Yorumları kapat</span><span className="sub">Bu ayarı daha sonra gönderi menüsünden değiştirebilirsin.</span></span><Toggle id="opt-nocom" on={noComments} onChange={setNoComments} label="Yorumları kapat" /></div>
+            <div className="opt-row"><Icon n="eyeOff" size={22} /><span className="grow"><span>Hassas içerik olarak işaretle</span><span className="sub">Bulanık görünür, isteyen dokunup açar. 18 yaş altına hiç gösterilmez.</span></span><Toggle id="opt-sensitive" on={sensitive} onChange={setSensitive} label="Hassas içerik olarak işaretle" /></div>
             <div style={{ paddingBlock: 18 }}><button className="btn grad block big" onClick={() => share(false)} disabled={progress != null}>Paylaş</button></div>
           </div>
         ) : null}

@@ -32,6 +32,7 @@ async function sql(q) {
   return j.data;
 }
 async function apiSignup(body, ip) {
+  body = { birth_year: 1995, ...body };
   const r = await fetch(BASE + '/mock/functions/signup', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-test-ip': ip || String(Math.random()) }, body: JSON.stringify(body) });
   const j = await r.json();
   if (!j.ok) throw new Error('signup: ' + JSON.stringify(j));

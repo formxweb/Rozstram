@@ -455,3 +455,18 @@ export function PersonRow({ uid, right, onClick, sub }) {
     </div>
   );
 }
+
+/* hassas içerik kapağı: bulanık + "Gönderiyi gör" (compact: ızgara karesi) */
+export function SensitiveCover({ post, compact }) {
+  const app = useApp();
+  if (!app.covered(post)) return null;
+  if (compact) return <span className="sens-cover compact" aria-label="Hassas içerik"><Icon n="eyeOff" size={22} /></span>;
+  return (
+    <div className="sens-cover" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+      <Icon n="eyeOff" size={30} />
+      <b>Hassas içerik</b>
+      <span>Bu gönderi bazı kişiler için rahatsız edici olabilir.</span>
+      <button className="sens-btn" onClick={(e) => { e.stopPropagation(); app.reveal(post.id); }}>Gönderiyi gör</button>
+    </div>
+  );
+}

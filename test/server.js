@@ -12,7 +12,7 @@ const STORE = process.env.STORE || '/var/tmp/rozstore';
 const PORT = Number(process.env.PORT || 8787);
 const pool = new Pool({ socket: '/var/tmp/rozpg/.s.PGSQL.5433', user: 'postgres', database: process.env.DB || 'roz' }, 8);
 const RT_TABLES = ['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views', 'story_likes',
-  'threads', 'thread_members', 'messages', 'message_reactions', 'notifications'];
+  'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'];
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 let COLS = {}, PKS = {}, FNS = {};
 const log = (...a) => { if (process.env.VERBOSE) console.log(...a); };
@@ -134,17 +134,21 @@ async function handleSignup(b, ip) {
   const email = b.email ? String(b.email).trim().toLowerCase() : null;
   const phone = b.phone ? String(b.phone).trim() : null;
   const password = String(b.password || '');
+  const thisYear = new Date().getUTCFullYear();
+  const birthYear = b.birth_year == null || b.birth_year === '' ? null : Number(b.birth_year);
   if (!/^[a-z0-9._]{3,30}$/.test(username) || !/[a-z]/.test(username) || /^\.|\.$|\.\./.test(username)) return json(400, { error: 'username_invalid' });
   if (!email && !phone) return json(400, { error: 'contact_required' });
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(400, { error: 'email_invalid' });
   if (phone && phone.replace(/\D/g, '').length < 10) return json(400, { error: 'phone_invalid' });
   if (password.length < 8) return json(400, { error: 'password_short' });
   if (password.length > 72) return json(400, { error: 'password_long' });
+  if (birthYear !== null && (!Number.isInteger(birthYear) || birthYear < thisYear - 120 || birthYear > thisYear)) return json(400, { error: 'birth_year_invalid' });
+  if (birthYear !== null && thisYear - birthYear < 13) return json(400, { error: 'too_young' });
   if (!(await pool.one('select public.signup_rate_ok(' + lit(ip) + ')', 'service_role'))) return json(429, { error: 'rate_limited' });
   const chk = await pool.one(`select public.signup_check(${lit(username)}, ${lit(email)}, ${lit(phone)})`, 'service_role');
   if (chk !== 'ok') return json(409, { error: chk });
   const loginEmail = 'u' + require('crypto').randomUUID().replace(/-/g, '').slice(0, 24) + '@hesap.rozstram.app';
-  const meta = { username, full_name: fullName, contact_email: email, contact_phone: phone };
+  const meta = { username, full_name: fullName, contact_email: email, contact_phone: phone, birth_year: birthYear };
   try {
     const id = await pool.one(`insert into auth.users (email, encrypted_password, raw_user_meta_data) values (${lit(loginEmail)}, extensions.crypt(${lit(password)}, extensions.gen_salt('bf')), ${lit(JSON.stringify(meta))}::jsonb) returning id`);
     return json(200, { ok: true, login_email: loginEmail, user_id: id });

@@ -4,6 +4,8 @@ import { USERNAME_RE, normPhone, slugify } from './lib.js';
 import { Icon, Mark, Sheet, Spinner } from './ui.jsx';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+export const THIS_YEAR = new Date().getFullYear();
+export const BIRTH_YEARS = Array.from({ length: 100 }, (_, i) => THIS_YEAR - i);
 
 function PasswordInput({ id, value, onChange, placeholder, autoComplete, onEnter }) {
   const [show, setShow] = useState(false);
@@ -110,7 +112,7 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
   const [pw, setPw] = useState('');
   const [username, setUsername] = useState('');
   const [avail, setAvail] = useState(null);
-  const [age, setAge] = useState(false);
+  const [birth, setBirth] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const checkSeq = useRef(0);
@@ -118,6 +120,8 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
   const contactOk = via === 'phone' ? normPhone(phone).replace(/\D/g, '').length >= 10 : EMAIL_RE.test(email.trim());
   const nameOk = name.trim().length >= 1 && pw.length >= 8;
   const unameOk = USERNAME_RE.test(username) && avail === true;
+  const age = birth ? THIS_YEAR - Number(birth) : null;
+  const birthOk = age !== null && age >= 13;
 
   useEffect(() => {
     if (step !== 'username') return undefined;
@@ -158,10 +162,10 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
     else onCancel();
   };
   const submit = async () => {
-    if (busy || !age) return;
+    if (busy || !birthOk) return;
     setBusy(true); setErr('');
     try {
-      const body = { username, full_name: name.trim(), password: pw, email: via === 'email' ? email.trim() : null, phone: via === 'phone' ? normPhone(phone) : null };
+      const body = { username, full_name: name.trim(), password: pw, email: via === 'email' ? email.trim() : null, phone: via === 'phone' ? normPhone(phone) : null, birth_year: Number(birth) };
       const { data, error } = await sb.functions.invoke('signup', { body });
       if (error || !data || !data.ok) {
         const b = await functionError(error, data);
@@ -242,10 +246,19 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
             <div><span>Ad</span><b>{name.trim()}</b></div>
             <div><span>{via === 'phone' ? 'Telefon' : 'E-posta'}</span><b>{via === 'phone' ? normPhone(phone) : email.trim()}</b></div>
           </div>
-          <label className="auth-check"><input id="su-age" type="checkbox" checked={age} onChange={(e) => setAge(e.target.checked)} /><span>13 yaşından büyüğüm</span></label>
+          <div className="auth-birth">
+            <label htmlFor="su-birth">Doğum yılın</label>
+            <select id="su-birth" value={birth} onChange={(e) => { setBirth(e.target.value); setErr(''); }}>
+              <option value="">Seç</option>
+              {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <p className="auth-note">{age !== null && age < 13 ? 'Rozstram’ı kullanmak için en az 13 yaşında olmalısın.'
+              : age !== null && age < 18 ? '18 yaşından küçük olduğun için hesabın gizli başlar, hassas içerik kapalı olur ve seni sadece takip ettiğin kişiler mesajla bulabilir.'
+              : 'Profilinde görünmez. Yaşına uygun bir Rozstram için kullanılır.'}</p>
+          </div>
           <p className="auth-p small">Kaydolarak <button className="inline-link" onClick={() => onLegal('terms')}>Kullanım Koşulları</button>’nı ve <button className="inline-link" onClick={() => onLegal('privacy')}>Gizlilik İlkesi</button>’ni kabul etmiş olursun.</p>
           {err ? <div className="auth-err" role="alert">{err}</div> : null}
-          <button className="btn grad block big" onClick={submit} disabled={!age || busy}>{busy ? <Spinner size={18} /> : 'Kaydol'}</button>
+          <button className="btn grad block big" onClick={submit} disabled={!birthOk || busy}>{busy ? <Spinner size={18} /> : 'Kaydol'}</button>
         </Fragment>
       ) : null}
     </Fragment>

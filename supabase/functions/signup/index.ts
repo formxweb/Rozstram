@@ -25,6 +25,8 @@ Deno.serve(async (req) => {
   const email = b.email ? String(b.email).trim().toLowerCase() : null;
   const phone = b.phone ? String(b.phone).trim() : null;
   const password = String(b.password ?? '');
+  const thisYear = new Date().getUTCFullYear();
+  const birthYear = b.birth_year == null || b.birth_year === '' ? null : Number(b.birth_year);
 
   if (!USERNAME_RE.test(username) || !/[a-z]/.test(username) || /^\.|\.$|\.\./.test(username)) return json({ error: 'username_invalid' }, 400);
   if (!email && !phone) return json({ error: 'contact_required' }, 400);
@@ -32,6 +34,8 @@ Deno.serve(async (req) => {
   if (phone && phone.replace(/\D/g, '').length < 10) return json({ error: 'phone_invalid' }, 400);
   if (password.length < 8) return json({ error: 'password_short' }, 400);
   if (password.length > 72) return json({ error: 'password_long' }, 400);
+  if (birthYear !== null && (!Number.isInteger(birthYear) || birthYear < thisYear - 120 || birthYear > thisYear)) return json({ error: 'birth_year_invalid' }, 400);
+  if (birthYear !== null && thisYear - birthYear < 13) return json({ error: 'too_young' }, 400);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -51,7 +55,7 @@ Deno.serve(async (req) => {
     email: loginEmail,
     password,
     email_confirm: true,
-    user_metadata: { username, full_name: fullName, contact_email: email, contact_phone: phone },
+    user_metadata: { username, full_name: fullName, contact_email: email, contact_phone: phone, birth_year: birthYear },
   });
   if (created.error) {
     // aynı anda aynı adla kayıt olunduysa doğru hatayı döndür

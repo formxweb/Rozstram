@@ -379,6 +379,120 @@ select t.as_user('00000000-0000-0000-0000-00000000000d');
 select t.ok(public.my_ban() is null and not public.user_banned(auth.uid()), 'süresi dolan ban kendiliğinden biter');
 select t.as_user('00000000-0000-0000-0000-00000000000a');
 
+-- ------------------------------------------------------------------ yaş, hassas içerik, şipşak, şifreli sohbet, yıl özeti
+\echo '== yaş ve genç hesap'
+reset role;
+select t.err($q$insert into auth.users (email, raw_user_meta_data) values ('k1@h.app', jsonb_build_object('username', 'kucuk', 'contact_email', 'k@k.com', 'birth_year', extract(year from now())::int - 10))$q$, 'too_young', '13 yaş altı kayıt olamaz');
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('00000000-0000-0000-0000-0000000000e1', 'ue1@h.app', jsonb_build_object('username', 'genc', 'full_name', 'Genç', 'contact_email', 'genc@mail.com', 'birth_year', extract(year from now())::int - 15)),
+  ('00000000-0000-0000-0000-0000000000e2', 'ue2@h.app', '{"username":"eren","full_name":"Eren","contact_email":"eren@mail.com"}'),
+  ('00000000-0000-0000-0000-0000000000e3', 'ue3@h.app', jsonb_build_object('username', 'fatma', 'full_name', 'Fatma', 'contact_email', 'fatma@mail.com', 'birth_year', 1990));
+set role authenticated;
+select t.as_user('00000000-0000-0000-0000-0000000000e1');
+select t.ok(public.am_minor(), 'genç hesap 18 yaş altı');
+select t.err($q$select public.is_minor('00000000-0000-0000-0000-0000000000e2')$q$, 'permission denied', 'başkasının yaşı sorgulanamaz');
+select t.ok((select is_private from public.profiles where id = auth.uid()), 'genç hesap gizli başlar');
+select t.ok((public.bootstrap() -> 'account' -> 'prefs' ->> 'sensitive') = 'hide', 'gençte hassas içerik kapalı başlar');
+select t.err($q$select public.set_prefs('{"sensitive":"show"}')$q$, 'teen_locked', 'genç hassas içeriği açamaz');
+select t.err($q$select public.set_birth_year(1990)$q$, 'birth_year_set', 'doğum yılı sonradan değiştirilemez');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok((public.bootstrap() -> 'account' ->> 'birthYear') is null, 'eski hesapta doğum yılı yok');
+select t.err($q$select public.set_birth_year(extract(year from now())::int - 8)$q$, 'too_young', '13 yaş altı doğum yılı kabul edilmez');
+select t.ok((public.set_birth_year(1995) ->> 'minor')::boolean = false, 'yetişkin doğum yılını ekledi');
+select t.ok(not public.am_minor(), 'eren yetişkin');
+select t.err($q$select public.set_prefs('{"sensitive":"acik"}')$q$, 'bad_value', 'geçersiz tercih');
+select t.ok((public.set_prefs('{"sensitive":"show"}') ->> 'sensitive') = 'show', 'yetişkin hassas içeriği açtı');
+select t.ok((select count(*) from public.accounts where user_id <> auth.uid()) = 0, 'başkasının doğum yılı görünmez');
+
+\echo '== hassas içerik'
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+insert into public.posts (id, media, caption, sensitive) values ('10000000-0000-0000-0000-0000000000e1', '[{"id":"e/p/1.jpg","type":"image"}]', 'hassas #yaz #deniz', true);
+insert into public.posts (id, media, caption) values ('10000000-0000-0000-0000-0000000000e2', '[{"id":"e/p/2.jpg","type":"image"}]', 'normal #yaz');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000e1') = 1, 'sahibi kendi hassas gönderisini görür');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select t.ok((select sensitive from public.posts where id = '10000000-0000-0000-0000-0000000000e1'), 'yetişkin (bulanık) hassas gönderiyi işaretli görür');
+select public.set_prefs('{"sensitive":"hide"}');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000e1') = 0, 'gizle seçince hassas gönderi hiç gelmez');
+select public.set_prefs('{"sensitive":"blur"}');
+select t.as_user('00000000-0000-0000-0000-0000000000e1');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000e1') = 0, 'genç hassas gönderiyi göremez');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000e2') = 1, 'genç normal gönderiyi görür');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select public.admin_set_sensitive('10000000-0000-0000-0000-0000000000e2', true);
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+update public.posts set sensitive = false where id = '10000000-0000-0000-0000-0000000000e2';
+select t.ok((select sensitive from public.posts where id = '10000000-0000-0000-0000-0000000000e2'), 'yöneticinin hassas işaretini sahibi kaldıramaz');
+update public.posts set sensitive = false where id = '10000000-0000-0000-0000-0000000000e1';
+select t.ok(not (select sensitive from public.posts where id = '10000000-0000-0000-0000-0000000000e1'), 'sahibi kendi işaretini kaldırabilir');
+
+\echo '== gençlere mesaj'
+select t.err($q$select public.start_dm('00000000-0000-0000-0000-0000000000e1')$q$, 'teen_dm', 'takip etmediği yetişkin gence yazamaz');
+select t.as_user('00000000-0000-0000-0000-0000000000e1');
+insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-0000000000e2');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok(public.start_dm('00000000-0000-0000-0000-0000000000e1') is not null, 'gencin takip ettiği kişi yazabilir');
+
+\echo '== şipşak'
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-0000000000e3');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-0000000000e2');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.err($q$select public.send_snap('{"id":"baskasi/i/a.jpg","type":"image"}', 'mutual')$q$, 'bad_media', 'başkasının dosyasıyla şipşak atılamaz');
+select t.err($q$insert into public.snaps (media) values ('{"id":"x","type":"image"}')$q$, 'permission denied', 'şipşak doğrudan eklenemez');
+select t.err($q$select public.send_snap('{"id":"00000000-0000-0000-0000-0000000000e2/i/a.jpg","type":"image"}', 'close')$q$, 'no_recipients', 'yakın arkadaş yoksa gönderilmez');
+select (public.send_snap('{"id":"00000000-0000-0000-0000-0000000000e2/i/a.jpg","type":"image","aspect":0.75}', 'mutual') ->> 'id') as snap_id \gset
+select t.ok((select count(*) from public.snap_recipients where snap_id = :'snap_id') = 1, 'şipşak sadece karşılıklı takipleşilen kişiye gitti (genç takip edilmiyor)');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select t.ok(jsonb_array_length(public.my_snaps() -> 'inbox') = 1, 'fatma şipşağı aldı');
+select t.ok((select count(*) from public.snaps) = 0, 'alıcı şipşak tablosunu doğrudan okuyamaz');
+select public.open_snap(:'snap_id', '😍');
+select t.ok(jsonb_array_length(public.my_snaps() -> 'inbox') = 0, 'görülen şipşak kaybolur');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok((public.my_snaps() -> 'sent' -> 0 -> 'seen' -> 0 ->> 'reaction') = '😍', 'gönderen gören kişiyi ve tepkisini görür');
+reset role; update public.snaps set expires_at = now() - interval '1 minute' where id = :'snap_id'; set role authenticated;
+select t.ok(jsonb_array_length(public.my_snaps() -> 'sent') = 0, '24 saat dolunca şipşak kaybolur');
+
+\echo '== uçtan uca şifreli sohbet'
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select public.start_secret_dm('00000000-0000-0000-0000-0000000000e3') as sec \gset
+select public.start_dm('00000000-0000-0000-0000-0000000000e3') as plain \gset
+select t.ok(:'sec' <> :'plain', 'şifreli sohbet normal sohbetten ayrı');
+select t.ok((select e2ee from public.threads where id = :'sec'), 'sohbet şifreli işaretli');
+select t.err($q$insert into public.messages (thread_id, text) values ('$q$ || :'sec' || $q$', 'düz metin')$q$, 'e2ee_only', 'şifreli sohbete düz metin yazılamaz');
+select t.err($q$insert into public.messages (thread_id, enc) values ('$q$ || :'plain' || $q$', '{"v":1}')$q$, 'e2ee_only', 'normal sohbete şifreli mesaj karışmaz');
+insert into public.messages (id, thread_id, enc, reply_to) values ('40000000-0000-0000-0000-0000000000e1', :'sec', '{"v":1,"iv":"x","ct":"y","k":{}}', '{"id":"40000000-0000-0000-0000-000000000001","text":"sızan alıntı"}');
+select t.ok((select reply_to from public.messages where id = '40000000-0000-0000-0000-0000000000e1') = '{"id":"40000000-0000-0000-0000-000000000001"}'::jsonb, 'alıntının düz metni sunucuya kaydedilmez');
+select t.ok((select last ->> 'text' from public.threads where id = :'sec') = '🔒 Şifreli mesaj', 'sohbet listesinde içerik görünmez');
+update public.messages set text = 'düzenleme' where id = '40000000-0000-0000-0000-0000000000e1';
+select t.ok((select text is null from public.messages where id = '40000000-0000-0000-0000-0000000000e1'), 'şifreli mesaja düz metin eklenemez');
+insert into public.device_keys (public_key) values ('{"kty":"EC","crv":"P-256","x":"a","y":"b"}');
+select t.err($q$insert into public.device_keys (user_id, public_key) values ('00000000-0000-0000-0000-0000000000e3', '{"kty":"EC"}')$q$, 'row-level security', 'başkası adına anahtar eklenemez');
+insert into public.device_keys (public_key) select '{"kty":"EC"}' from generate_series(1, 9);
+select t.err($q$insert into public.device_keys (public_key) values ('{"kty":"EC"}')$q$, 'row-level security', 'en fazla 10 cihaz');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select t.ok((select count(*) from public.device_keys where user_id = '00000000-0000-0000-0000-0000000000e2') = 10, 'açık anahtarlar okunabilir');
+
+\echo '== yıl özeti ve en sevdiğin yıl'
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+insert into public.post_likes (post_id) values ('10000000-0000-0000-0000-0000000000e1');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select public.year_recap(extract(year from now())::int) as rc \gset
+select t.ok((:'rc'::jsonb ->> 'posts')::int = 2 and (:'rc'::jsonb ->> 'likes')::int = 1, 'yıl özeti: 2 gönderi, 1 beğeni');
+select t.ok((:'rc'::jsonb -> 'topPost' ->> 'id') = '10000000-0000-0000-0000-0000000000e1', 'en çok beğenilen gönderi');
+select t.ok((:'rc'::jsonb -> 'topTags' ->> 0) = 'yaz', 'en çok kullanılan etiket');
+select t.err($q$select public.year_recap(1990)$q$, 'bad_value', 'geçersiz yıl');
+select t.ok((public.set_favorite_year(2018, 'kis') -> 'mine' ->> 'year') = '2018', 'en sevdiğin yıl kaydedildi');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select public.set_favorite_year(2018);
+select public.set_favorite_year(2018, 'yaz') as fy \gset
+select t.ok((:'fy'::jsonb ->> 'sameYear')::int = 2 and (:'fy'::jsonb ->> 'summer')::int = 1 and (:'fy'::jsonb ->> 'winter')::int = 1, '2018 istatistiği (1 yaz, 1 kış)');
+select t.ok((:'fy'::jsonb -> 'top' ->> 'year') = '2018', 'en sevilen yıl 2018');
+select t.ok((public.bootstrap() -> 'favoriteYear' ->> 'season') = 'yaz', 'açılışta kendi seçimin gelir');
+select t.err($q$select public.set_favorite_year(1900)$q$, 'bad_value', 'çok eski yıl seçilemez');
+select t.err($q$select * from public.favorite_years$q$, 'permission denied', 'kimin hangi yılı seçtiği okunamaz');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+
 -- ------------------------------------------------------------------ hesap silme
 \echo '== hesap silme'
 reset role;

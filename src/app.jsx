@@ -9,6 +9,10 @@ import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, S
 import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
 import { AdminScreen, BanSheet } from './admin.jsx';
 import { BannedScreen } from './banned.jsx';
+import { BirthYearScreen } from './age.jsx';
+import { SnapCamera, SnapViewer } from './snaps.jsx';
+import { decryptEnc, e2eeSupported, encryptFor, ensureDevice, keysFor } from './e2ee.js';
+import { FavoriteYearSheet, YearRecap } from './recap.jsx';
 import { MusicScreen } from './music.jsx';
 import { stopMusic } from './player.jsx';
 import { HomeScreen, CommentsSheet, LikesSheet, SendSheet, PostScreen, PeekModal } from './feed.jsx';
@@ -22,7 +26,7 @@ import { InboxScreen, ChatScreen, NewMessageScreen, GroupInfoScreen } from './me
 import { ActivityScreen } from './activity.jsx';
 import { AuthScreen } from './auth.jsx';
 
-const FULLSCREEN = { chat: 1, create: 1, edit: 1, newmsg: 1 };
+const FULLSCREEN = { chat: 1, create: 1, edit: 1, newmsg: 1, snap: 1 };
 const BAN_TEXT = errText({ message: 'banned' });
 const noop = () => {};
 const map = (arr) => { const m = {}; (arr || []).forEach((x) => { m[x.id] = x; }); return m; };
@@ -49,6 +53,10 @@ function App() {
   const [viewed, setViewed] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [ban, setBan] = useState(null);
+  const [snaps, setSnaps] = useState({ inbox: [], sent: [] });
+  const [snapView, setSnapView] = useState(null);
+  const [favoriteYear, setFavoriteYearState] = useState(null);
+  const [recap, setRecap] = useState(null);
   const [settings, setSettings] = useState({});
   const [rankEpoch, setRankEpoch] = useState(0);
   const [conn, setConn] = useState('ok');
@@ -64,7 +72,7 @@ function App() {
   const [peek, setPeek] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const [sound, setSound] = useState(false);
-  const [theme, setThemeState] = useState(() => store.get('theme', 'system'));
+  const [themePick, setThemeState] = useState(() => store.get('theme', null));
   const [seenLocal, setSeenLocal] = useState(() => store.get('seenStories', {}));
   const [feedMode, setFeedModeState] = useState(() => store.get('feedMode', 'foryou'));
   const [onboarding, setOnboarding] = useState(false);
@@ -82,6 +90,7 @@ function App() {
   const deepLink = useRef(null);
 
   const checkBanRef = useRef(noop);
+  const loadSnapsRef = useRef(noop);
   const toast = useCallback((text, action) => {
     if (text === BAN_TEXT) checkBanRef.current();
     setToastMsg({ text, action, k: Date.now() });
@@ -156,6 +165,8 @@ function App() {
     setViewed(flag(data.viewed));
     setIsAdmin(!!data.isAdmin);
     setBan(data.ban || null);
+    setSnaps(data.snaps || { inbox: [], sent: [] });
+    setFavoriteYearState(data.favoriteYear || null);
     setSettings(data.settings || {});
     setRankEpoch((e) => e + 1);
     setLoaded(true);
@@ -283,6 +294,9 @@ function App() {
         });
         break;
       }
+      case 'snap_recipients':
+        loadSnapsRef.current();
+        break;
       case 'notifications':
         if (ev === 'DELETE') setNotifs((l) => l.filter((n) => n.id !== old.id));
         else if (ev === 'INSERT') setNotifs((l) => [rowNotification(nw)].concat(l.filter((n) => n.id !== nw.id)));
@@ -297,7 +311,7 @@ function App() {
   useEffect(() => {
     if (!sb || !me.id || !loaded) return undefined;
     const tables = ['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views', 'story_likes',
-      'threads', 'thread_members', 'messages', 'message_reactions', 'notifications'];
+      'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'];
     let ch = sb.channel('db-' + me.id);
     tables.forEach((t) => {
       ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, (p) => onDb(t, p.eventType, p.new || {}, p.old || {}));
@@ -349,10 +363,12 @@ function App() {
     return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(iv); };
   }, [sb, me.id, loaded]);
 
-  /* tema */
+  /* tema: kişi seçmediyse 18 yaş altına Renkli, diğerlerine sistem teması */
+  const minor = !!(account && account.minor);
+  const theme = themePick || (minor ? 'fun' : 'system');
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
+    if (theme === 'light' || theme === 'dark' || theme === 'fun') root.setAttribute('data-theme', theme);
     else root.removeAttribute('data-theme');
   }, [theme]);
 
@@ -710,6 +726,7 @@ function App() {
     if ('pinned' in fields) row.pinned = fields.pinned;
     if ('archived' in fields) row.archived = fields.archived;
     if ('tagged' in fields) row.tagged = fields.tagged;
+    if ('sensitive' in fields) row.sensitive = fields.sensitive;
     const prev = post;
     patchPost(post.id, (p) => ({ ...p, ...fields }));
     const ok = await run(sb.from('posts').update(row).eq('id', post.id), 'Değişiklik kaydedilemedi.');
@@ -776,7 +793,7 @@ function App() {
       } else {
         const row = {
           id, author: me.id, kind: o.mode, media, caption: o.caption || '', location: o.location || '', filter: o.filter || 'none', adjust: o.adjust || null,
-          hide_likes: !!o.hideLikes, comments_off: !!o.noComments, tagged: o.tagged || [], music: o.music || null,
+          hide_likes: !!o.hideLikes, comments_off: !!o.noComments, sensitive: !!o.sensitive, tagged: o.tagged || [], music: o.music || null,
         };
         const { error } = await sb.from('posts').insert(row);
         if (error) throw error;
@@ -853,7 +870,81 @@ function App() {
   const removeHighlight = (hlId) => saveHighlights(((myProfile && myProfile.highlights) || []).filter((h) => h.id !== hlId));
 
   /* ------------------------------------------------ mesajlar */
-  const dmWith = useCallback((uid) => threads.find((t) => !t.isGroup && t.members.some((m) => m.id === uid) && t.members.some((m) => m.id === me.id)) || null, [threads, me.id]);
+  const dmWith = useCallback((uid) => threads.find((t) => !t.isGroup && !t.e2ee && t.members.some((m) => m.id === uid) && t.members.some((m) => m.id === me.id)) || null, [threads, me.id]);
+  const secretWith = useCallback((uid) => threads.find((t) => !t.isGroup && t.e2ee && t.members.some((m) => m.id === uid) && t.members.some((m) => m.id === me.id)) || null, [threads, me.id]);
+
+  /* ------------------------------------------------ uçtan uca şifreli sohbet */
+  const devRef = useRef(null);
+  const [e2eeState, setE2eeState] = useState('off');
+  const [plain, setPlain] = useState({});
+  const plainRef = useRef(plain); plainRef.current = plain;
+  const ensureE2ee = async () => {
+    if (devRef.current) return devRef.current;
+    if (!e2eeSupported()) { setE2eeState('unsupported'); return null; }
+    try {
+      devRef.current = await ensureDevice(sb, me.id);
+      setE2eeState('ready');
+      return devRef.current;
+    } catch (e) { console.warn('e2ee', e); setE2eeState('error'); return null; }
+  };
+  const decrypting = useRef({});
+  const decryptMessages = async (list) => {
+    const todo = list.filter((m) => m.enc && !m.unsent && !plainRef.current[m.id] && !decrypting.current[m.id]);
+    if (!todo.length) return;
+    const dev = await ensureE2ee();
+    const out = {};
+    for (const m of todo) {
+      decrypting.current[m.id] = true;
+      if (!dev) { out[m.id] = { err: 'device' }; continue; }
+      try { const p = await decryptEnc(sb, dev, m.enc); out[m.id] = { t: String(p.t || '') }; } catch (e) { out[m.id] = { err: e.code === 'old' ? 'old' : 'fail' }; }
+      decrypting.current[m.id] = false;
+    }
+    setPlain((cur) => ({ ...cur, ...out }));
+  };
+  const sendSecret = async (tid, text, replyTo) => {
+    const t = threadsRef.current[tid];
+    if (!t) return false;
+    const dev = await ensureE2ee();
+    if (!dev) { toast('Bu tarayıcı şifreli sohbeti desteklemiyor.'); return false; }
+    const id = uuid();
+    try {
+      const uids = t.members.map((m) => m.id);
+      const devices = await keysFor(sb, uids, true);
+      const other = uids.find((u) => u !== me.id);
+      if (other && !devices.some((d) => d.user_id === other)) { toast('@' + nameOf(other) + ' henüz şifreli sohbeti açabilen sürümü kullanmıyor.'); return false; }
+      if (!devices.some((d) => d.id === dev.id)) devices.push({ id: dev.id, user_id: me.id, public_key: dev.pub });
+      const encd = await encryptFor(dev, devices, { t: text });
+      const row = { id, thread_id: tid, sender: me.id, enc: encd, reply_to: replyTo ? { id: replyTo.id } : null };
+      setPlain((cur) => ({ ...cur, [id]: { t: text } }));
+      emitLocal('messages', 'INSERT', { ...row, created_at: iso(), pending: true });
+      const { error } = await sb.from('messages').insert(row);
+      if (error) { emitLocal('messages', 'DELETE', { id }); toast(errText(error, 'Mesaj gönderilemedi.')); return false; }
+      patchThread(tid, (x) => ({ ...x, at: Date.now(), last: { id, from: me.id, at: Date.now(), text: '🔒 Şifreli mesaj', post: null }, members: x.members.map((m) => (m.id === me.id ? { ...m, read: Date.now(), accepted: true } : m)) }));
+      setTyping(null);
+      return true;
+    } catch (e) {
+      emitLocal('messages', 'DELETE', { id });
+      toast('Şifreli mesaj gönderilemedi.');
+      console.warn(e);
+      return false;
+    }
+  };
+  useEffect(() => { devRef.current = null; setPlain({}); }, [me.id]);
+  useEffect(() => { if (loaded && me.id) ensureE2ee(); }, [loaded, me.id]);
+  const openSecretChatWith = async (uid) => {
+    setPanel(null); setStoryView(null);
+    if (blocks[uid]) { toast('Engellediğin kişiye mesaj atamazsın.'); return; }
+    const existing = secretWith(uid);
+    if (existing) { push({ type: 'chat', tid: existing.id }); return; }
+    const dev = await ensureE2ee();
+    if (!dev) { toast('Bu tarayıcı şifreli sohbeti desteklemiyor.'); return; }
+    const devices = await keysFor(sb, [uid], true).catch(() => []);
+    if (!devices.length) { toast('@' + nameOf(uid) + ' henüz şifreli sohbeti açabilen sürümü kullanmıyor.'); return; }
+    const { data, error } = await sb.rpc('start_secret_dm', { other: uid });
+    if (error) { toast(errText(error, 'Şifreli sohbet açılamadı.')); return; }
+    await fetchThread(data);
+    push({ type: 'chat', tid: data });
+  };
   const ensureDm = async (uid) => {
     const t = dmWith(uid);
     if (t) return t.id;
@@ -1024,10 +1115,58 @@ function App() {
     const { error } = await sb.rpc('update_contact', { p_email: email || null, p_phone: phone || null });
     if (error) { toast(errText(error, 'Kaydedilemedi.')); return false; }
     const { data } = await sb.from('accounts').select('email, phone').eq('user_id', me.id);
-    if (data && data[0]) setAccount(data[0]);
+    if (data && data[0]) setAccount((a) => ({ ...(a || {}), ...data[0] }));
     toast('Bilgilerin güncellendi');
     return true;
   };
+  /* yaş ve tercihler */
+  const sensitivePref = minor ? 'hide' : ((account && account.prefs && account.prefs.sensitive) || 'blur');
+  const setSensitivePref = async (v) => {
+    if (v === sensitivePref) return true;
+    const before = sensitivePref;
+    const { data, error } = await sb.rpc('set_prefs', { p: { sensitive: v } });
+    if (error) { toast(errText(error, 'Kaydedilemedi.')); return false; }
+    setAccount((a) => ({ ...(a || {}), prefs: data || {} }));
+    if (before === 'hide' || v === 'hide') boot(true);  // gizlenen gönderiler sunucudan gelmez: akışı tazele
+    return true;
+  };
+  const birthYearDone = () => boot(true);
+
+  /* şipşak */
+  const snapTimer = useRef(null);
+  const loadSnaps = () => {
+    clearTimeout(snapTimer.current);
+    snapTimer.current = setTimeout(async () => {
+      const { data } = await sb.rpc('my_snaps');
+      if (data) setSnaps(data);
+    }, 250);
+  };
+  loadSnapsRef.current = loadSnaps;
+  const sendSnap = async (blob, w, h, audience) => {
+    let path;
+    try { path = await upload(blob, 'i', 'jpg', 'image/jpeg'); } catch (e) { toast(errText(e, 'Fotoğraf yüklenemedi.')); return null; }
+    const { data, error } = await sb.rpc('send_snap', { p_media: { id: path, type: 'image', w, h, aspect: Math.round((w / h) * 1000) / 1000 }, p_audience: audience });
+    if (error) { toast(errText(error, 'Şipşak gönderilemedi.')); return null; }
+    loadSnaps();
+    return data;
+  };
+  const undoSnap = async (id) => {
+    const ok = await run(sb.from('snaps').delete().eq('id', id), 'Geri alınamadı.');
+    if (ok) { setSnaps((s) => ({ ...s, sent: s.sent.filter((x) => x.id !== id) })); toast('Şipşak geri alındı'); }
+    return ok;
+  };
+  const openSnap = (id, reaction) => {
+    sb.rpc('open_snap', { sid: id, p_reaction: reaction || null }).then(noop, noop);
+    if (!reaction) setSnaps((s) => ({ ...s, inbox: s.inbox.filter((x) => x.id !== id) }));
+  };
+  const snapAudienceCounts = useMemo(() => {
+    const fans = followRows.filter((r) => r.t === me.id && r.s === 'accepted' && !blocks[r.f] && base[r.f]).map((r) => r.f);
+    return { mutual: fans.filter((u) => following.has(u)).length, close: fans.filter((u) => closeFriends[u]).length };
+  }, [followRows, me.id, blocks, base, following, closeFriends]);
+  const snapNew = useMemo(() => new Set(snaps.inbox.map((s) => s.from)).size, [snaps.inbox]);
+  const [revealed, setRevealed] = useState({});
+  const covered = useCallback((post) => !!(post && post.sensitive && post.author !== me.id && sensitivePref !== 'show' && !revealed[post.id]), [me.id, sensitivePref, revealed]);
+  const reveal = (id) => setRevealed((r) => ({ ...r, [id]: true }));
   const changePassword = async (pw) => {
     const { error } = await sb.auth.updateUser({ password: pw });
     if (error) { toast(/should be different/i.test(error.message || '') ? 'Yeni şifre eskisinden farklı olmalı.' : errText(error, 'Şifre değiştirilemedi.')); return false; }
@@ -1118,6 +1257,11 @@ function App() {
       return ok;
     },
     rejectAppeal: (uid) => adminRpc('admin_reject_appeal', { uid }, 'İtiraz reddedildi, ban sürüyor'),
+    sensitive: async (post, v) => {
+      const ok = await adminRpc('admin_set_sensitive', { pid: post.id, v }, v ? 'Hassas olarak işaretlendi' : 'Hassas işareti kaldırıldı');
+      if (ok) mergePost(post.id, { sensitive: !!v, sensitiveAdmin: !!v });
+      return ok;
+    },
     setRank: async (w) => {
       const data = await adminRpc('admin_set_rank', { v: w }, 'Algoritma ayarları kaydedildi');
       if (data) { setSettings((s) => ({ ...s, rank: data })); scoreCache.current.epoch = -1; setRankEpoch((e) => e + 1); }
@@ -1192,6 +1336,16 @@ function App() {
   const openSend = (post) => setPanel({ type: 'send', post, k: rid() });
   const openCreate = (mode, extra) => push({ type: 'create', mode: mode || 'post', ...(extra || {}) });
   const openMusic = (id) => { if (id) { setPanel(null); push({ type: 'music', id }); } };
+  const openSnapCamera = () => { setPanel(null); push({ type: 'snap' }); };
+  const openSnapViewer = (uid) => setSnapView({ uid, k: rid() });
+  const openRecap = () => { setPanel(null); setRecap({ k: rid() }); };
+  const openFavoriteYear = () => setPanel({ type: 'favyear', k: rid() });
+  const setFavoriteYear = async (y, season) => {
+    const { data, error } = await sb.rpc('set_favorite_year', { y, p_season: season || null });
+    if (error) { toast(errText(error, 'Kaydedilemedi.')); return null; }
+    setFavoriteYearState((data && data.mine) || null);
+    return data;
+  };
   const openBan = (uid) => { if (isAdmin && uid && uid !== me.id) setPanel({ type: 'ban', uid, k: rid() }); };
   const openTag = (tag) => { setPanel(null); setStoryView(null); push({ type: 'tag', tag: tag.replace(/^#/, '') }); };
   const openThread = (tid) => { setPanel(null); setStoryView(null); push({ type: 'chat', tid }); };
@@ -1211,6 +1365,7 @@ function App() {
       items.push({ label: post.archived ? 'Profilde göster' : 'Arşivle', icon: 'history', onClick: () => editPost(post, { archived: !post.archived }).then((ok) => ok && toast(post.archived ? 'Profilinde tekrar görünüyor' : 'Arşivlendi. Sadece sen görebilirsin.')) });
       items.push({ label: post.hideLikes ? 'Beğeni sayısını göster' : 'Beğeni sayısını gizle', icon: post.hideLikes ? 'eye' : 'eyeOff', onClick: () => editPost(post, { hideLikes: !post.hideLikes }) });
       items.push({ label: post.noComments ? 'Yorumları aç' : 'Yorumları kapat', icon: 'comment', onClick: () => editPost(post, { noComments: !post.noComments }) });
+      if (!post.sensitiveAdmin) items.push({ label: post.sensitive ? 'Hassas işaretini kaldır' : 'Hassas içerik olarak işaretle', icon: 'eyeOff', onClick: () => editPost(post, { sensitive: !post.sensitive }).then((ok) => ok && toast(post.sensitive ? 'Hassas işareti kaldırıldı' : 'Hassas içerik olarak işaretlendi')) });
     }
     items.push({ label: 'Hikayene ekle', icon: 'plusSq', onClick: () => shareToStory(post) });
     items.push({ label: 'Bağlantıyı paylaş', icon: 'link', onClick: () => copyLink(post) });
@@ -1226,6 +1381,7 @@ function App() {
     if (isAdmin) {
       if (post.boost > 0) items.push({ label: 'Öne çıkarmayı bitir (Yönetici)', icon: 'flame', onClick: () => admin.boost(post, 0) });
       else items.push({ label: 'Öne çıkar (Yönetici)', icon: 'flame', onClick: () => setSheet({ title: 'Ne kadar süre öne çıksın?', items: [1, 3, 7].map((d) => ({ label: d + ' gün', icon: 'clock', onClick: () => admin.boost(post, d) })) }) });
+      items.push({ label: post.sensitive ? 'Hassas işaretini kaldır (Yönetici)' : 'Hassas olarak işaretle (Yönetici)', icon: 'eyeOff', onClick: () => admin.sensitive(post, !post.sensitive) });
       if (!mine && !(profiles[post.author] || {}).banned) items.push({ label: 'Kullanıcıyı banla (Yönetici)', icon: 'shield', danger: true, onClick: () => openBan(post.author) });
       if (!mine) items.push({ label: 'Gönderiyi kaldır (Yönetici)', icon: 'trash', danger: true, onClick: () => confirm({ title: 'Gönderi kaldırılsın mı?', text: 'Sahibi dışında kimse göremez. Yönetici panelinden geri getirebilirsin.', ok: 'Kaldır', danger: true, onOk: () => admin.remove(post, 'Yönetici kaldırdı') }) });
     }
@@ -1250,7 +1406,10 @@ function App() {
     stories, storyById, storyGroups, groupSeen, storyRing, isSeen,
     threads, inboxThreads, requestThreads, otherOf, myMember, isRequest, isUnread, unreadThreads,
     saved, hidden, activity, notifs, unreadActivity,
-    sound, setSound, feedMode, setFeedMode, theme, setTheme, retap, tab,
+    sound, setSound, feedMode, setFeedMode, theme, setTheme, retap, tab, minor, sensitivePref, setSensitivePref, covered, reveal,
+    e2eeState, plain, decryptMessages, sendSecret, openSecretChatWith, ensureE2ee,
+    favoriteYear, setFavoriteYear, openRecap, openFavoriteYear,
+    snaps, snapNew, snapAudienceCounts, sendSnap, undoSnap, openSnap, openSnapCamera, openSnapViewer,
     nameOf, avatarOf, uidByName, isOnline, typingIn, lastSeenText, toast, confirm, setSheet, setPanel, setPeek,
     setLike, setCommentLike, setSaved, hidePost, restoreHidden, setFollow, confirmUnfollow, cancelRequest, acceptRequest, declineRequest,
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
@@ -1274,6 +1433,7 @@ function App() {
   if (phase === 'auth') return <AuthScreen sb={sb} onSignedUp={(id) => store.set('onboard:' + id, true)} />;
   if (!loaded) return <BootScreen note={conn === 'down' ? 'Bağlantı kuruluyor…' : null} retry={conn === 'down' ? () => boot(false).then((ok) => setConn(ok ? 'ok' : 'down')) : null} />;
   if (ban) return <BannedScreen ban={ban} username={myProfile && myProfile.username} sb={sb} onLogout={logout} onCheck={checkBan} />;
+  if (account && !account.birthYear) return <BirthYearScreen sb={sb} username={myProfile && myProfile.username} onDone={birthYearDone} onLogout={logout} />;
 
   const renderPage = (o, i) => {
     const onBack = () => popTo(i);
@@ -1291,6 +1451,7 @@ function App() {
     else if (o.type === 'settings') body = <SettingsScreen />;
     else if (o.type === 'admin') body = <AdminScreen />;
     else if (o.type === 'music') body = <MusicScreen id={o.id} />;
+    else if (o.type === 'snap') body = <SnapCamera onClose={onBack} />;
     else if (o.type === 'account') body = <AccountScreen />;
     else if (o.type === 'plist') body = <PeopleListScreen kind={o.kind} />;
     else if (o.type === 'grid') body = <GridScreen kind={o.kind} title={o.title} />;
@@ -1331,6 +1492,9 @@ function App() {
             <span className={'me-ring' + (tab === 'profile' && !stack.length ? ' on' : '')}><img className="av" src={avatarOf(me.id)} alt="" style={{ width: 26, height: 26 }} /></span>
           </button>
         </nav>
+        {recap ? <YearRecap key={recap.k} onClose={() => setRecap(null)} /> : null}
+        {panel && panel.type === 'favyear' ? <FavoriteYearSheet key={panel.k} onClose={() => setPanel(null)} /> : null}
+        {snapView ? <SnapViewer key={snapView.k} uid={snapView.uid} onClose={() => setSnapView(null)} /> : null}
         {storyView ? <StoryViewer key={storyView.index + ':' + storyView.groups.map((g) => g.uid).join()} {...storyView} onClose={() => setStoryView(null)} /> : null}
         {panel && panel.type === 'comments' ? <CommentsSheet key={panel.k} postId={panel.postId} replyTo={panel.replyTo} focus={panel.focus} onClose={() => setPanel(null)} /> : null}
         {panel && panel.type === 'likes' ? <LikesSheet key={panel.k} ids={panel.ids} title={panel.title} onClose={() => setPanel(null)} /> : null}

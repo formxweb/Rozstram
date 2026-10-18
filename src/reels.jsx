@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { fmt, haptic, isOn, mediaUrl, onKeys, postFilter } from './lib.js';
-import { Avatar, HeartBurst, Icon, RichText, Vid, useInView, useTaps } from './ui.jsx';
+import { Avatar, HeartBurst, Icon, RichText, Vid, useInView, useTaps, SensitiveCover } from './ui.jsx';
 import { useMusic } from './player.jsx';
 
 function ReelItem({ post, live }) {
@@ -19,7 +19,7 @@ function ReelItem({ post, live }) {
   const m = (post.media || [])[0] || {};
   const liked = isOn(post.likes, app.me.id);
   const saved = !!app.saved[post.id];
-  const playing = live && inView && !hold;
+  const playing = live && inView && !hold && !app.covered(post);
   useMusic(post.music, playing, 'reel:' + post.id);
   const tap = useTaps(() => {
     const next = !app.sound;
@@ -38,6 +38,7 @@ function ReelItem({ post, live }) {
       <div style={{ position: 'absolute', inset: 0 }} onPointerDown={down} onPointerUp={up} onPointerLeave={up} onPointerCancel={up} onClick={click} onContextMenu={(e) => e.preventDefault()}>
         <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={postFilter(post)} playing={playing} onProgress={setProg} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
       </div>
+      <SensitiveCover post={post} />
       <div className="shade-top" />
       <div className="shade" />
       {flash ? <div className="center-ico" key={flash.k}><div><Icon n={flash.n} size={30} /></div></div> : null}

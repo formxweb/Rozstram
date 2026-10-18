@@ -45,6 +45,7 @@ export function ProfileScreen({ uid, isTab }) {
     items: [
       { label: 'Profili paylaş', icon: 'share', onClick: () => app.setPanel({ type: 'shareProfile', uid, k: Date.now() }) },
       { label: 'Mesaj gönder', icon: 'send', onClick: () => app.openChatWith(uid) },
+      { label: 'Şifreli sohbet', icon: 'lock', onClick: () => app.openSecretChatWith(uid) },
       ...(app.following.has(uid) ? [{ label: app.closeFriends[uid] ? 'Yakın Arkadaşlar’dan çıkar' : 'Yakın Arkadaşlar’a ekle', icon: 'star', onClick: () => app.setCloseFriend(uid, !app.closeFriends[uid]) }] : []),
       { label: app.mutes[uid] ? 'Sesini aç' : 'Sessize al', icon: 'volOff', onClick: () => app.setMute(uid, !app.mutes[uid]) },
       ...(followsMe ? [{ label: 'Takipçilerimden çıkar', icon: 'userX', onClick: () => app.removeFollower(uid) }] : []),

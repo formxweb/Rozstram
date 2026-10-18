@@ -78,6 +78,8 @@ export function SettingsScreen() {
         <Row icon="history" label="Hikaye arşivi" sub="Tüm hikayelerin, öne çıkarmak için" onClick={() => app.push({ type: 'grid', kind: 'archive', title: 'Hikaye arşivi' })} />
         <Row icon="gallery" label="Gönderi arşivi" sub="Profilinden gizlediğin gönderiler" onClick={() => app.push({ type: 'grid', kind: 'postArchive', title: 'Gönderi arşivi' })} />
         <Row icon="activity" label="Bildirimler" onClick={() => app.push({ type: 'activity' })} />
+        <Row icon="sparkle" label="Yıl özetin" sub="Paylaşımların, beğenilerin, en sevdiğin yıl" onClick={app.openRecap} />
+        <Row icon="clock" label="En sevdiğin yıl" sub={app.favoriteYear ? app.favoriteYear.year + (app.favoriteYear.season === 'yaz' ? ' · Yazı ☀️' : app.favoriteYear.season === 'kis' ? ' · Kışı ❄️' : '') : 'Henüz seçmedin'} onClick={app.openFavoriteYear} />
 
         <div className="set-head">Kimler görebilir</div>
         <Row icon="lock" label="Gizli hesap" sub={p.private ? 'Sadece onayladığın takipçiler gönderilerini görür' : 'Herkes profilini ve gönderilerini görebilir'}
@@ -91,8 +93,21 @@ export function SettingsScreen() {
         <div className="set-head">Uygulama</div>
         <div style={{ paddingBlock: 8 }}>
           <div className="seg" role="radiogroup" aria-label="Tema">
-            {[['system', 'Sistem'], ['light', 'Açık'], ['dark', 'Koyu']].map(([k, l]) => <button key={k} role="radio" aria-checked={app.theme === k} className={app.theme === k ? 'on' : ''} onClick={() => app.setTheme(k)}>{l}</button>)}
+            {[['system', 'Sistem'], ['light', 'Açık'], ['dark', 'Koyu'], ['fun', 'Renkli']].map(([k, l]) => <button key={k} role="radio" aria-checked={app.theme === k} className={app.theme === k ? 'on' : ''} onClick={() => app.setTheme(k)}>{l}</button>)}
           </div>
+        </div>
+        <div className="set-sub-head" id="sensitive-head">Hassas içerik</div>
+        <div style={{ paddingBlock: '4px 8px' }}>
+          <div className={'seg' + (app.minor ? ' locked' : '')} role="radiogroup" aria-label="Hassas içerik">
+            {[['show', 'Göster'], ['blur', 'Bulanık'], ['hide', 'Gizle']].map(([k, l]) => (
+              <button key={k} role="radio" aria-checked={app.sensitivePref === k} className={app.sensitivePref === k ? 'on' : ''} disabled={app.minor && k !== 'hide'}
+                onClick={() => app.setSensitivePref(k)}>{l}</button>
+            ))}
+          </div>
+          <p className="set-note">{app.minor ? '18 yaşından küçük olduğun için hassas içerik hep gizli kalır.'
+            : app.sensitivePref === 'show' ? 'Hassas olarak işaretlenen gönderiler normal görünür.'
+            : app.sensitivePref === 'hide' ? 'Hassas olarak işaretlenen gönderiler sana hiç gösterilmez.'
+            : 'Hassas gönderiler bulanık gelir, dokunursan açılır.'}</p>
         </div>
         <div style={{ paddingBlock: 8 }}>
           <div className="seg" role="radiogroup" aria-label="Akış">
@@ -107,7 +122,7 @@ export function SettingsScreen() {
         <Row icon="shield" label="Gizlilik İlkesi" onClick={() => setLegal('privacy')} />
         <Row icon="info" label="Kullanım Koşulları" onClick={() => setLegal('terms')} />
         <div className="set-row" style={{ alignItems: 'flex-start' }}>
-          <Mark size={24} /><span className="grow"><span>Rozstram 3.0</span><span className="sub">Mesajlar uçtan uca şifreli değildir. Şifre ya da kart bilgisi paylaşma.</span></span>
+          <Mark size={24} /><span className="grow"><span>Rozstram 3.0</span><span className="sub">Normal sohbetler uçtan uca şifreli değildir; kişinin profilinden “Şifreli sohbet” başlatabilirsin. Şifre ya da kart bilgisi paylaşma.</span></span>
         </div>
         <div style={{ paddingBlock: '10px 24px' }}>
           <button className="btn block big danger-btn" onClick={() => app.confirm({ title: 'Çıkış yapılsın mı?', text: '@' + (p.username || '') + ' hesabından çıkış yapacaksın.', ok: 'Çıkış yap', danger: true, onOk: app.logout })}>Çıkış yap</button>

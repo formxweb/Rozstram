@@ -274,6 +274,60 @@ create table if not exists public.reports (
   resolved_at timestamptz
 );
 
+-- ---------------------------------------------------------------------
+-- 1b) YAŞ, HASSAS İÇERİK, ŞİPŞAK, UÇTAN UCA ŞİFRELİ SOHBET, EN SEVDİĞİN YIL
+-- ---------------------------------------------------------------------
+
+-- doğum yılı (gizli; sadece sahibi görür) ve kişisel tercihler (ör. hassas içerik)
+alter table public.accounts add column if not exists birth_year int check (birth_year between 1900 and 2100);
+alter table public.accounts add column if not exists prefs jsonb not null default '{}'::jsonb
+  check (jsonb_typeof(prefs) = 'object' and char_length(prefs::text) <= 2000);
+
+-- hassas içerik: sahibi ya da yönetici işaretler; yöneticinin işareti sahibince kaldırılamaz
+alter table public.posts add column if not exists sensitive boolean not null default false;
+alter table public.posts add column if not exists sensitive_admin boolean not null default false;
+
+-- Şipşak: anında çekilen foto; arkadaşlar bir kez görür, 24 saatte kaybolur
+create table if not exists public.snaps (
+  id         uuid primary key default gen_random_uuid(),
+  sender     uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  media      jsonb not null check (jsonb_typeof(media) = 'object' and char_length(media::text) <= 1000),
+  caption    text check (char_length(caption) <= 80),
+  audience   text not null default 'mutual' check (audience in ('close', 'mutual')),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '24 hours'
+);
+create index if not exists snaps_sender_idx on public.snaps (sender, created_at desc);
+create table if not exists public.snap_recipients (
+  snap_id  uuid not null references public.snaps (id) on delete cascade,
+  user_id  uuid not null references public.profiles (id) on delete cascade,
+  seen_at  timestamptz,
+  reaction text check (char_length(reaction) <= 16),
+  primary key (snap_id, user_id)
+);
+create index if not exists snap_recipients_user_idx on public.snap_recipients (user_id, seen_at);
+
+-- Uçtan uca şifreli sohbet: her cihazın açık anahtarı (gizli anahtar cihazdan hiç çıkmaz)
+create table if not exists public.device_keys (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  public_key jsonb not null check (jsonb_typeof(public_key) = 'object' and char_length(public_key::text) <= 600),
+  label      text check (char_length(label) <= 60),
+  created_at timestamptz not null default now()
+);
+create index if not exists device_keys_user_idx on public.device_keys (user_id, created_at desc);
+alter table public.threads add column if not exists e2ee boolean not null default false;
+alter table public.messages add column if not exists enc jsonb check (enc is null or (jsonb_typeof(enc) = 'object' and char_length(enc::text) <= 60000));
+
+-- En sevdiğin yıl (sadece toplu istatistik paylaşılır)
+create table if not exists public.favorite_years (
+  user_id    uuid primary key default auth.uid() references public.profiles (id) on delete cascade,
+  year       int not null check (year between 1950 and 2100),
+  season     text check (season in ('kis', 'yaz')),
+  updated_at timestamptz not null default now()
+);
+create index if not exists favorite_years_year_idx on public.favorite_years (year);
+
 -- =====================================================================
 -- 2) YARDIMCI FONKSİYONLAR
 -- =====================================================================
@@ -311,6 +365,23 @@ $$;
 create or replace function public.blocked_me(owner uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.blocks where blocker = owner and blocked = auth.uid());
+$$;
+
+-- 18 yaş altı mı? (doğum yılına göre; bilinmiyorsa yetişkin sayılır, uygulama doğum yılını sorar)
+create or replace function public.is_minor(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select birth_year > extract(year from now())::int - 18 from public.accounts where user_id = uid), false);
+$$;
+
+-- sadece kendi yaş durumum (başkasının 18 yaş altı olup olmadığı kimseye açık değildir)
+create or replace function public.am_minor() returns boolean
+language sql stable security definer set search_path = public as $$ select public.is_minor(auth.uid()) $$;
+
+-- giriş yapan kişi hassas içeriği hiç görmemeli mi? (18 yaş altı ya da tercihi "gizle")
+create or replace function public.hide_sensitive() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select birth_year > extract(year from now())::int - 18 or prefs ->> 'sensitive' = 'hide'
+                   from public.accounts where user_id = auth.uid()), false);
 $$;
 
 -- Bu hesap şu an banlı mı? (süresi dolan geçici ban sayılmaz)
@@ -415,12 +486,18 @@ declare
   u  text := lower(btrim(coalesce(m ->> 'username', '')));
   em text := public.norm_email(m ->> 'contact_email');
   ph text := public.norm_phone(m ->> 'contact_phone');
+  cy int := extract(year from now())::int;
+  byr int := case when (m ->> 'birth_year') ~ '^[0-9]{4}$' then (m ->> 'birth_year')::int else null end;
 begin
   if not public.username_valid(u) then raise exception 'username_invalid'; end if;
   if em is null and ph is null then raise exception 'contact_required'; end if;
+  if byr is not null and (byr < cy - 120 or byr > cy) then raise exception 'birth_year_invalid'; end if;
+  if byr is not null and byr > cy - 13 then raise exception 'too_young'; end if;
   insert into public.usernames (name, user_id) values (u, new.id);
-  insert into public.profiles (id, username, full_name) values (new.id, u, left(btrim(coalesce(m ->> 'full_name', '')), 60));
-  insert into public.accounts (user_id, login_email, email, phone) values (new.id, lower(new.email), em, ph);
+  insert into public.profiles (id, username, full_name, is_private)
+  values (new.id, u, left(btrim(coalesce(m ->> 'full_name', '')), 60), coalesce(byr > cy - 18, false));
+  insert into public.accounts (user_id, login_email, email, phone, birth_year, prefs)
+  values (new.id, lower(new.email), em, ph, byr, case when byr > cy - 18 then '{"sensitive":"hide"}'::jsonb else '{}'::jsonb end);
   return new;
 end $$;
 
@@ -564,10 +641,14 @@ create or replace function public.posts_before() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
-    new.created_at := now(); new.edited_at := null;
+    new.created_at := now(); new.edited_at := null; new.sensitive_admin := false;
     new.tagged := coalesce((select array_agg(distinct t) from unnest(new.tagged) t where t <> new.author), '{}');
   else
     new.id := old.id; new.author := old.author; new.created_at := old.created_at; new.media := old.media; new.kind := old.kind;
+    if not public.is_admin() then
+      new.sensitive_admin := old.sensitive_admin;
+      if old.sensitive_admin then new.sensitive := true; end if;
+    end if;
     if new.caption is distinct from old.caption or new.location is distinct from old.location or new.tagged is distinct from old.tagged then
       new.edited_at := now();
     end if;
@@ -692,6 +773,7 @@ create or replace function public.msg_preview(m public.messages) returns text
 language sql immutable as $$
   select case
     when m.unsent then 'Mesaj geri alındı'
+    when m.enc is not null then '🔒 Şifreli mesaj'
     when m.text is not null and m.text <> '' then left(m.text, 120)
     when m.media ->> 'type' = 'audio' then '🎤 Sesli mesaj'
     when m.media ->> 'type' = 'video' then '🎬 Video'
@@ -705,12 +787,24 @@ language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
     new.created_at := now(); new.unsent := false; new.edited_at := null;
-    if coalesce(btrim(new.text), '') = '' and new.media is null and new.post_id is null then raise exception 'empty_message'; end if;
+    if coalesce((select e2ee from public.threads where id = new.thread_id), false) then
+      -- uçtan uca şifreli sohbet: sunucu sadece şifreli içeriği saklar, düz metin/medya/alıntı kabul edilmez
+      if new.enc is null or new.text is not null or new.media is not null or new.post_id is not null or new.story is not null then
+        raise exception 'e2ee_only';
+      end if;
+      new.reply_to := case when jsonb_typeof(new.reply_to) = 'object' and new.reply_to ? 'id' then jsonb_build_object('id', new.reply_to ->> 'id') else null end;
+    else
+      if new.enc is not null then raise exception 'e2ee_only'; end if;
+      if coalesce(btrim(new.text), '') = '' and new.media is null and new.post_id is null then raise exception 'empty_message'; end if;
+    end if;
   else
     new.id := old.id; new.thread_id := old.thread_id; new.sender := old.sender; new.created_at := old.created_at;
     if old.unsent then return old; end if;
+    new.enc := old.enc;
     if new.unsent then
-      new.text := null; new.media := null; new.post_id := null; new.story := null; new.reply_to := null;
+      new.text := null; new.media := null; new.post_id := null; new.story := null; new.reply_to := null; new.enc := null;
+    elsif old.enc is not null then
+      new.text := old.text;  -- şifreli mesaj düzenlenemez
     elsif new.text is distinct from old.text then
       if old.created_at < now() - interval '15 minutes' then raise exception 'edit_window'; end if;
       new.media := old.media; new.post_id := old.post_id; new.edited_at := now();
@@ -760,7 +854,8 @@ end $$;
 -- 5) MESAJLAŞMA FONKSİYONLARI
 -- =====================================================================
 
-create or replace function public.start_dm(other uuid) returns uuid
+-- 1:1 sohbet aç (secret = uçtan uca şifreli ayrı sohbet). 18 yaş altına sadece takip ettiği kişiler yeni sohbet açabilir.
+create or replace function public.open_dm(other uuid, secret boolean) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
   me  uuid := auth.uid();
@@ -772,17 +867,24 @@ begin
   if not exists (select 1 from public.profiles where id = other) then raise exception 'not_found'; end if;
   if public.blocked_between(me, other) then raise exception 'blocked'; end if;
   if public.ban_hidden(other) then raise exception 'not_found'; end if;
-  k := least(me::text, other::text) || ':' || greatest(me::text, other::text);
+  follows_me := exists (select 1 from public.follows where follower = other and following = me and status = 'accepted');
+  k := case when secret then 'e2e:' else '' end || least(me::text, other::text) || ':' || greatest(me::text, other::text);
   select id into tid from public.threads where dm_key = k;
   if tid is null then
-    insert into public.threads (is_group, dm_key, created_by) values (false, k, me)
+    if public.is_minor(other) and not follows_me then raise exception 'teen_dm'; end if;
+    insert into public.threads (is_group, dm_key, created_by, e2ee) values (false, k, me, coalesce(secret, false))
     on conflict (dm_key) do update set dm_key = excluded.dm_key returning id into tid;
   end if;
-  follows_me := exists (select 1 from public.follows where follower = other and following = me and status = 'accepted');
   insert into public.thread_members (thread_id, user_id, accepted) values (tid, me, true) on conflict do nothing;
   insert into public.thread_members (thread_id, user_id, accepted) values (tid, other, follows_me) on conflict do nothing;
   return tid;
 end $$;
+
+create or replace function public.start_dm(other uuid) returns uuid
+language sql security definer set search_path = public as $$ select public.open_dm(other, false) $$;
+
+create or replace function public.start_secret_dm(other uuid) returns uuid
+language sql security definer set search_path = public as $$ select public.open_dm(other, true) $$;
 
 create or replace function public.create_group(member_ids uuid[], p_title text) returns uuid
 language plpgsql security definer set search_path = public as $$
@@ -1151,6 +1253,171 @@ begin
 end $$;
 
 -- =====================================================================
+-- 5d) YAŞ, HASSAS İÇERİK, ŞİPŞAK, ŞİFRELİ SOHBET, YIL ÖZETİ
+-- =====================================================================
+
+-- Doğum yılı bir kez girilir (sonradan değiştirilemez). 13 yaş altı kullanamaz; 18 altı gizli hesap + hassas içerik kapalı.
+create or replace function public.set_birth_year(y int) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cy int := extract(year from now())::int;
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  if y is null or y < cy - 120 or y > cy then raise exception 'birth_year_invalid'; end if;
+  if y > cy - 13 then raise exception 'too_young'; end if;
+  update public.accounts set birth_year = y,
+    prefs = case when y > cy - 18 then prefs || '{"sensitive":"hide"}'::jsonb else prefs end
+  where user_id = auth.uid() and birth_year is null;
+  if not found then raise exception 'birth_year_set'; end if;
+  if y > cy - 18 then update public.profiles set is_private = true where id = auth.uid(); end if;
+  return jsonb_build_object('birthYear', y, 'minor', y > cy - 18);
+end $$;
+
+-- Kişisel tercihler. sensitive: show (göster) | blur (bulanık, varsayılan) | hide (gizle). 18 altı için hep gizle.
+create or replace function public.set_prefs(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cur jsonb; sv text := p ->> 'sensitive';
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  if sv is not null and sv not in ('show', 'blur', 'hide') then raise exception 'bad_value'; end if;
+  if sv is not null and sv <> 'hide' and public.is_minor(auth.uid()) then raise exception 'teen_locked'; end if;
+  update public.accounts set prefs = prefs || jsonb_strip_nulls(jsonb_build_object('sensitive', sv))
+  where user_id = auth.uid() returning prefs into cur;
+  return cur;
+end $$;
+
+-- Yönetici bir gönderiyi hassas olarak işaretler (sahibi bu işareti kaldıramaz)
+create or replace function public.admin_set_sensitive(pid uuid, v boolean) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.admin_check();
+  update public.posts set sensitive = coalesce(v, false), sensitive_admin = coalesce(v, false) where id = pid;
+end $$;
+
+-- Şipşak: gönderen; alıcılar onu takip eden ve (yakın arkadaş | karşılıklı takip) olanlar
+create or replace function public.snap_sender(sid uuid) returns uuid
+language sql stable security definer set search_path = public as $$ select sender from public.snaps where id = sid $$;
+
+create or replace function public.send_snap(p_media jsonb, p_audience text default 'mutual', p_caption text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare me uuid := auth.uid(); sid uuid; n int;
+begin
+  if me is null then raise exception 'not_authenticated'; end if;
+  if public.user_banned(me) then raise exception 'banned'; end if;
+  if coalesce(p_audience, '') not in ('close', 'mutual') then raise exception 'bad_value'; end if;
+  if jsonb_typeof(p_media) is distinct from 'object' or p_media ->> 'type' is distinct from 'image'
+     or coalesce(p_media ->> 'id', '') !~ ('^' || me::text || '/i/') then raise exception 'bad_media'; end if;
+  insert into public.snaps (sender, media, caption, audience)
+  values (me, p_media, nullif(left(btrim(coalesce(p_caption, '')), 80), ''), p_audience) returning id into sid;
+  insert into public.snap_recipients (snap_id, user_id)
+  select sid, f.follower from public.follows f
+  where f.following = me and f.status = 'accepted'
+    and case when p_audience = 'close'
+          then exists (select 1 from public.close_friends c where c.owner = me and c.friend = f.follower)
+          else exists (select 1 from public.follows g where g.follower = me and g.following = f.follower and g.status = 'accepted') end
+    and not public.blocked_between(me, f.follower) and not public.user_banned(f.follower);
+  get diagnostics n = row_count;
+  if n = 0 then raise exception 'no_recipients'; end if;
+  return jsonb_build_object('id', sid, 'count', n);
+end $$;
+
+-- Şipşağı aç (bir kez görülür) ve isteğe bağlı tepki bırak
+create or replace function public.open_snap(sid uuid, p_reaction text default null) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.snap_recipients set seen_at = coalesce(seen_at, now()), reaction = coalesce(nullif(left(btrim(coalesce(p_reaction, '')), 16), ''), reaction)
+  where snap_id = sid and user_id = auth.uid();
+end $$;
+
+-- Bana gelen (henüz görmediğim) ve son 24 saatte gönderdiğim şipşaklar
+create or replace function public.my_snaps() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'inbox', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'from', s.sender, 'media', s.media, 'caption', s.caption, 'at', public.ms(s.created_at)) order by s.created_at)
+      from public.snaps s join public.snap_recipients r on r.snap_id = s.id
+      where r.user_id = auth.uid() and r.seen_at is null and s.expires_at > now()
+        and not public.blocked_between(s.sender, auth.uid()) and not public.ban_hidden(s.sender)), '[]'::jsonb),
+    'sent', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'media', s.media, 'caption', s.caption, 'audience', s.audience, 'at', public.ms(s.created_at),
+        'to', (select count(*) from public.snap_recipients r where r.snap_id = s.id),
+        'seen', (select coalesce(jsonb_agg(jsonb_build_object('id', r.user_id, 'at', public.ms(r.seen_at), 'reaction', r.reaction) order by r.seen_at), '[]'::jsonb)
+                 from public.snap_recipients r where r.snap_id = s.id and r.seen_at is not null)) order by s.created_at desc)
+      from public.snaps s where s.sender = auth.uid() and s.expires_at > now()), '[]'::jsonb)
+  );
+$$;
+
+-- Yıl özeti: o yıl paylaştıkların, topladıkların, en sevilen gönderin, etiketlerin, en çok etkileşimde olduğun kişiler
+create or replace function public.year_recap(y int) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  t0 timestamptz;
+  t1 timestamptz;
+begin
+  if me is null then raise exception 'not_authenticated'; end if;
+  if y is null or y < 2000 or y > extract(year from now())::int then raise exception 'bad_value'; end if;
+  t0 := make_timestamptz(y, 1, 1, 0, 0, 0, 'Europe/Istanbul');
+  t1 := make_timestamptz(y + 1, 1, 1, 0, 0, 0, 'Europe/Istanbul');
+  return jsonb_build_object(
+    'year', y,
+    'joined', (select extract(year from created_at)::int from public.profiles where id = me),
+    'posts', (select count(*) from public.posts where author = me and kind = 'post' and created_at >= t0 and created_at < t1),
+    'reels', (select count(*) from public.posts where author = me and kind = 'reel' and created_at >= t0 and created_at < t1),
+    'stories', (select count(*) from public.stories where author = me and created_at >= t0 and created_at < t1),
+    'likes', (select count(*) from public.post_likes l join public.posts p on p.id = l.post_id
+              where p.author = me and l.user_id <> me and l.created_at >= t0 and l.created_at < t1),
+    'comments', (select count(*) from public.comments c join public.posts p on p.id = c.post_id
+                 where p.author = me and c.author <> me and c.created_at >= t0 and c.created_at < t1),
+    'views', (select count(*) from public.post_views v join public.posts p on p.id = v.post_id
+              where p.author = me and v.viewer <> me and v.created_at >= t0 and v.created_at < t1),
+    'followers', (select count(*) from public.follows where following = me and status = 'accepted' and created_at >= t0 and created_at < t1),
+    'messages', (select count(*) from public.messages where sender = me and created_at >= t0 and created_at < t1),
+    'likesGiven', (select count(*) from public.post_likes where user_id = me and created_at >= t0 and created_at < t1),
+    'activeDays', (select count(distinct d) from (
+        select (created_at at time zone 'Europe/Istanbul')::date d from public.posts where author = me and created_at >= t0 and created_at < t1
+        union select (created_at at time zone 'Europe/Istanbul')::date from public.stories where author = me and created_at >= t0 and created_at < t1
+        union select (created_at at time zone 'Europe/Istanbul')::date from public.comments where author = me and created_at >= t0 and created_at < t1
+        union select (created_at at time zone 'Europe/Istanbul')::date from public.messages where sender = me and created_at >= t0 and created_at < t1) x),
+    'topPost', (select public.post_json(p) from public.posts p
+                where p.author = me and not p.archived and p.created_at >= t0 and p.created_at < t1
+                order by (select count(*) from public.post_likes l where l.post_id = p.id) desc, p.created_at desc limit 1),
+    'topTags', coalesce((select jsonb_agg(tag order by n desc, tag) from (
+        select lower(m[1]) tag, count(*) n from public.posts p, regexp_matches(p.caption, '#([^[:space:]#.,!?;:()]+)', 'g') m
+        where p.author = me and p.created_at >= t0 and p.created_at < t1 group by 1 order by 2 desc, 1 limit 3) q), '[]'::jsonb),
+    'topPeople', coalesce((select jsonb_agg(uid order by n desc) from (
+        select p.author uid, count(*) n from public.post_likes l join public.posts p on p.id = l.post_id
+        where l.user_id = me and p.author <> me and l.created_at >= t0 and l.created_at < t1
+          and not public.blocked_between(me, p.author) and not public.ban_hidden(p.author)
+        group by 1 order by 2 desc limit 3) q), '[]'::jsonb)
+  );
+end $$;
+
+-- En sevdiğin yıl: senin seçimin + toplu istatistik (kimin neyi seçtiği paylaşılmaz)
+create or replace function public.favorite_year_info() returns jsonb
+language sql stable security definer set search_path = public as $$
+  with mine as (select year, season from public.favorite_years where user_id = auth.uid())
+  select jsonb_build_object(
+    'mine', (select jsonb_build_object('year', year, 'season', season) from mine),
+    'total', (select count(*) from public.favorite_years),
+    'sameYear', (select count(*) from public.favorite_years f join mine on f.year = mine.year),
+    'summer', (select count(*) from public.favorite_years f join mine on f.year = mine.year where f.season = 'yaz'),
+    'winter', (select count(*) from public.favorite_years f join mine on f.year = mine.year where f.season = 'kis'),
+    'top', (select jsonb_build_object('year', year, 'count', count(*)) from public.favorite_years group by year order by count(*) desc, year desc limit 1)
+  );
+$$;
+
+create or replace function public.set_favorite_year(y int, p_season text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not_authenticated'; end if;
+  if y is null or y < 1950 or y > extract(year from now())::int then raise exception 'bad_value'; end if;
+  if p_season is not null and p_season not in ('kis', 'yaz') then raise exception 'bad_value'; end if;
+  insert into public.favorite_years (user_id, year, season, updated_at) values (auth.uid(), y, p_season, now())
+  on conflict (user_id) do update set
+    season = case when public.favorite_years.year = excluded.year then coalesce(excluded.season, public.favorite_years.season) else excluded.season end,
+    year = excluded.year, updated_at = now();
+  return public.favorite_year_info();
+end $$;
+
+-- =====================================================================
 -- 6) VERİ OKUMA (tek seferde açılış verisi)
 -- =====================================================================
 
@@ -1162,7 +1429,8 @@ language sql stable as $$
     'pinned', p.pinned, 'archived', p.archived, 'at', public.ms(p.created_at), 'edited', case when p.edited_at is null then null else public.ms(p.edited_at) end,
     'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb),
     'views', public.view_count(p.id),
-    'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id), 'music', p.music
+    'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id), 'music', p.music,
+    'sensitive', p.sensitive, 'sensitiveAdmin', p.sensitive_admin
   );
 $$;
 
@@ -1198,7 +1466,7 @@ $$;
 create or replace function public.thread_json(t public.threads) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
-    'id', t.id, 'isGroup', t.is_group, 'title', t.title, 'createdBy', t.created_by, 'at', public.ms(t.last_at), 'last', t.last,
+    'id', t.id, 'isGroup', t.is_group, 'title', t.title, 'createdBy', t.created_by, 'at', public.ms(t.last_at), 'last', t.last, 'e2ee', t.e2ee,
     'members', coalesce((select jsonb_agg(jsonb_build_object('id', m.user_id, 'read', public.ms(m.last_read_at), 'accepted', m.accepted, 'muted', m.muted) order by m.joined_at)
                          from public.thread_members m where m.thread_id = t.id), '[]'::jsonb)
   );
@@ -1223,7 +1491,8 @@ language sql stable set search_path = public as $$
   feed as (select p.* from public.posts p where p.id in (select id from ids))
   select jsonb_build_object(
     'me', (select id from me),
-    'account', (select jsonb_build_object('email', a.email, 'phone', a.phone) from public.accounts a where a.user_id = auth.uid()),
+    'account', (select jsonb_build_object('email', a.email, 'phone', a.phone, 'birthYear', a.birth_year, 'minor', public.am_minor(), 'prefs', a.prefs)
+                from public.accounts a where a.user_id = auth.uid()),
     'profiles', coalesce((select jsonb_agg(public.profile_json(p)) from (select * from public.profiles order by created_at limit 5000) p), '[]'::jsonb),
     'follows', coalesce((select jsonb_agg(jsonb_build_array(f.follower, f.following, f.status, public.ms(f.created_at))) from public.follows f), '[]'::jsonb),
     'posts', coalesce((select jsonb_agg(public.post_json(f)) from feed f), '[]'::jsonb),
@@ -1238,6 +1507,8 @@ language sql stable set search_path = public as $$
     'viewed', public.my_views(),
     'isAdmin', public.is_admin(),
     'ban', public.my_ban(),
+    'snaps', public.my_snaps(),
+    'favoriteYear', public.favorite_year_info() -> 'mine',
     'settings', coalesce((select jsonb_object_agg(s.key, s.value) from public.app_settings s), '{}'::jsonb),
     'notifications', coalesce((select jsonb_agg(x) from (
         select jsonb_build_object('id', n.id, 'kind', n.kind, 'actor', n.actor, 'post', n.post_id, 'cid', n.comment_id, 'story', n.story_id,
@@ -1277,7 +1548,7 @@ create or replace function public.message_json(m public.messages) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
     'id', m.id, 'thread', m.thread_id, 'from', m.sender, 'text', m.text, 'media', m.media, 'post', m.post_id, 'story', m.story,
-    'replyTo', m.reply_to, 'unsent', m.unsent, 'edited', m.edited_at is not null, 'at', public.ms(m.created_at),
+    'replyTo', m.reply_to, 'unsent', m.unsent, 'edited', m.edited_at is not null, 'at', public.ms(m.created_at), 'enc', m.enc,
     'reactions', coalesce((select jsonb_object_agg(r.user_id, r.emoji) from public.message_reactions r where r.message_id = m.id), '{}'::jsonb)
   );
 $$;
@@ -1325,6 +1596,27 @@ alter table public.post_boosts       enable row level security;
 alter table public.post_removals     enable row level security;
 alter table public.music_tracks      enable row level security;
 alter table public.user_bans         enable row level security;
+alter table public.snaps             enable row level security;
+alter table public.snap_recipients   enable row level security;
+alter table public.device_keys       enable row level security;
+alter table public.favorite_years    enable row level security;
+
+-- şipşak: gönderen kendi şipşağını görür/geri alır; alıcılar şipşağı my_snaps() ile alır
+drop policy if exists snaps_select on public.snaps;
+create policy snaps_select on public.snaps for select to authenticated using (sender = auth.uid());
+drop policy if exists snaps_delete on public.snaps;
+create policy snaps_delete on public.snaps for delete to authenticated using (sender = auth.uid());
+drop policy if exists snap_recipients_select on public.snap_recipients;
+create policy snap_recipients_select on public.snap_recipients for select to authenticated using (user_id = auth.uid() or public.snap_sender(snap_id) = auth.uid());
+
+-- cihaz anahtarları: açık anahtarlar herkese açık (şifrelemek için gerekli); kişi en fazla 10 cihaz ekler, kendi cihazını siler
+drop policy if exists device_keys_select on public.device_keys;
+create policy device_keys_select on public.device_keys for select to authenticated using (true);
+drop policy if exists device_keys_insert on public.device_keys;
+create policy device_keys_insert on public.device_keys for insert to authenticated
+  with check (user_id = auth.uid() and (select count(*) from public.device_keys d where d.user_id = auth.uid()) < 10);
+drop policy if exists device_keys_delete on public.device_keys;
+create policy device_keys_delete on public.device_keys for delete to authenticated using (user_id = auth.uid());
 drop policy if exists music_select on public.music_tracks;
 create policy music_select on public.music_tracks for select to authenticated using (active or public.is_admin());
 drop policy if exists app_settings_select on public.app_settings;
@@ -1375,7 +1667,7 @@ create policy hidden_all on public.hidden_posts for all to authenticated using (
 -- gönderiler
 drop policy if exists posts_select on public.posts;
 create policy posts_select on public.posts for select to authenticated using (
-  author = auth.uid() or (not archived and public.can_view(author) and not public.post_removed(id))
+  author = auth.uid() or (not archived and public.can_view(author) and not public.post_removed(id) and not (sensitive and public.hide_sensitive()))
 );
 drop policy if exists posts_insert on public.posts;
 create policy posts_insert on public.posts for insert to authenticated with check (author = auth.uid());
@@ -1515,6 +1807,10 @@ revoke all on public.post_views from authenticated;
 revoke all on public.app_admins, public.post_boosts, public.post_removals, public.user_bans from authenticated;
 revoke insert, update, delete on public.app_settings from authenticated;
 revoke insert, update, delete on public.music_tracks from authenticated;
+revoke insert, update on public.snaps from authenticated;
+revoke insert, update, delete on public.snap_recipients from authenticated;
+revoke update on public.device_keys from authenticated;
+revoke all on public.favorite_years from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1532,6 +1828,9 @@ grant execute on function
   public.admin_boost_post(uuid, numeric, int), public.admin_set_rank(jsonb), public.admin_set_verified(uuid, boolean),
   public.admin_add_track(text, text, text, text, numeric), public.admin_set_track_active(uuid, boolean),
   public.user_banned(uuid), public.ban_hidden(uuid), public.my_ban(), public.ban_appeal(text),
+  public.am_minor(), public.hide_sensitive(), public.set_birth_year(int), public.set_prefs(jsonb), public.admin_set_sensitive(uuid, boolean),
+  public.snap_sender(uuid), public.send_snap(jsonb, text, text), public.open_snap(uuid, text), public.my_snaps(),
+  public.start_secret_dm(uuid), public.year_recap(int), public.favorite_year_info(), public.set_favorite_year(int, text),
   public.admin_ban_user(uuid, text, int), public.admin_unban_user(uuid), public.admin_reject_appeal(uuid), public.admin_users(text),
   public.post_json(public.posts), public.comment_json(public.comments), public.story_json(public.stories), public.profile_json(public.profiles),
   public.thread_json(public.threads), public.message_json(public.messages), public.msg_preview(public.messages),
@@ -1558,7 +1857,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views',
-                           'story_likes', 'threads', 'thread_members', 'messages', 'message_reactions', 'notifications'] loop
+                           'story_likes', 'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when others then null;

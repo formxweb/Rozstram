@@ -137,7 +137,7 @@ async function logout(page) {
   await back(A); await back(A);
   await nav(A, 'Ana sayfa');
   await A.locator('.stories .story-chip button.plus').click();
-  await A.getByRole('button', { name: 'Yazı' }).click();
+  await A.getByRole('button', { name: 'Yazı', exact: true }).click();
   await A.fill('#story-text', 'Sadece yakın arkadaşlarım 💚');
   await A.locator('.se-share.cf').click();
   await wait(1200);
@@ -240,7 +240,7 @@ async function logout(page) {
   await D.fill('#su-user', 'deniz');
   await D.waitForSelector('.auth-input.uname.good');
   await D.getByRole('button', { name: 'İleri' }).click();
-  await D.check('#su-age');
+  await D.selectOption('#su-birth', '1995');
   await D.getByRole('button', { name: 'Kaydol' }).click();
   await text(D, 'Hoş geldin, @deniz');
   await D.getByRole('button', { name: 'Şimdilik atla' }).click();

@@ -61,7 +61,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   if (!/^ali/.test(sug)) throw new Error('öneri beklenmedik: ' + sug);
   ok('kullanıcı adı önerisi: ' + sug);
   await A.getByRole('button', { name: 'İleri' }).click();
-  await A.check('#su-age');
+  await A.selectOption('#su-birth', '1995');
   await shot(A, 'kayit-4-onay');
   await A.getByRole('button', { name: 'Kaydol' }).click();
   await text(A, 'Hoş geldin, @' + sug);
@@ -85,7 +85,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   await B.fill('#su-user', 'ayse');
   await B.waitForSelector('.auth-input.uname.good');
   await B.getByRole('button', { name: 'İleri' }).click();
-  await B.check('#su-age');
+  await B.selectOption('#su-birth', '1995');
   await B.getByRole('button', { name: 'Kaydol' }).click();
   await text(B, 'Hoş geldin, @ayse');
   await B.getByRole('button', { name: 'Şimdilik atla' }).click();
@@ -241,7 +241,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   await wait(300);
   await A.locator('nav button[aria-label="Ana sayfa"]').click();
   await A.locator('.stories .story-chip button.plus').click();
-  await A.getByRole('button', { name: 'Yazı' }).click();
+  await A.getByRole('button', { name: 'Yazı', exact: true }).click();
   await A.fill('#story-text', 'Rozstram yayında! 🎉');
   await shot(A, 'hikaye-yazi');
   await A.locator('.se-share', { hasText: 'Hikayen' }).click();

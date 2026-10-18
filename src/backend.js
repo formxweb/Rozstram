@@ -89,7 +89,7 @@ export function rowStory(r, prev) {
 
 export function rowThread(r, prev) {
   return {
-    id: r.id, isGroup: !!r.is_group, title: r.title || '', createdBy: r.created_by || null, at: toMs(r.last_at), last: r.last || null,
+    id: r.id, isGroup: !!r.is_group, title: r.title || '', createdBy: r.created_by || null, at: toMs(r.last_at), last: r.last || null, e2ee: !!r.e2ee,
     members: (prev && prev.members) || [],
   };
 }
@@ -97,7 +97,7 @@ export function rowThread(r, prev) {
 export function rowMessage(r, prev) {
   return {
     id: r.id, thread: r.thread_id, from: r.sender, text: r.text, media: r.media || null, post: r.post_id || null, story: r.story || null,
-    replyTo: r.reply_to || null, unsent: !!r.unsent, edited: !!r.edited_at, at: toMs(r.created_at), reactions: (prev && prev.reactions) || {},
+    replyTo: r.reply_to || null, unsent: !!r.unsent, edited: !!r.edited_at, at: toMs(r.created_at), reactions: (prev && prev.reactions) || {}, enc: r.enc || null,
   };
 }
 
@@ -127,6 +127,15 @@ const ERRORS = {
   banned: 'Hesabın askıya alındı.',
   appeal_sent: 'İtirazın zaten gönderildi.',
   not_found: 'Bulunamadı; hesap ya da içerik artık yok.',
+  too_young: 'Rozstram’ı kullanmak için en az 13 yaşında olmalısın.',
+  birth_year_invalid: 'Geçerli bir doğum yılı seç.',
+  birth_year_set: 'Doğum yılın zaten kayıtlı.',
+  teen_locked: '18 yaşından küçükler için hassas içerik kapalı kalır.',
+  teen_dm: 'Bu kişi sadece takip ettiği hesaplardan yeni mesaj alabilir.',
+  e2ee_only: 'Şifreli sohbette sadece şifreli mesaj gönderilebilir.',
+  no_recipients: 'Şipşak gidecek kimse yok. Karşılıklı takipleştiğin ya da Yakın Arkadaşlar listendeki kişilere gider.',
+  bad_media: 'Fotoğraf yüklenemedi, tekrar dene.',
+  bad_value: 'Geçersiz değer.',
 };
 export function errCodeOf(e) {
   if (!e) return '';

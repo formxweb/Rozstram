@@ -3,6 +3,8 @@ import { useApp, useBack } from './ctx.js';
 import { rowMessage, toMs } from './backend.js';
 import { REACTIONS, ago, copyText, haptic, mediaUrl, postFilter, snapshotFile } from './lib.js';
 import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Spinner, Toggle, TopBar, UName, useLongPress, useTaps } from './ui.jsx';
+import { SnapStrip } from './snaps.jsx';
+import { keysFor, safetyCode } from './e2ee.js';
 
 const EMOJI_ONLY = new RegExp('^(\\p{Extended_Pictographic}|\\uFE0F|\\u200D|\\s){1,6}$', 'u');
 const EDIT_WINDOW = 15 * 60000;
@@ -58,6 +60,7 @@ export function InboxScreen() {
         right={<button className="icon-btn" aria-label="Yeni mesaj" onClick={() => app.push({ type: 'newmsg' })}><Icon n="newmsg" /></button>} />
       <div className="body g">
         <label className="search" style={{ marginBlock: '4px 4px' }}><Icon n="search" size={17} /><input id="inbox-q" type="search" placeholder="Ara" value={q} onChange={(e) => setQ(e.target.value)} /></label>
+        {!term ? <SnapStrip /> : null}
         {!term ? (
           <div className="notes-row">
             <button className="note-item" onClick={() => setNoteOpen(true)}>
@@ -95,7 +98,7 @@ export function InboxScreen() {
             <button className="row inbox-row" key={t.id} style={{ animationDelay: Math.min(i, 12) * 0.03 + 's' }} onClick={() => app.openThread(t.id)}>
               <ThreadAvatar t={t} size={56} />
               <span className="grow">
-                <span style={{ fontWeight: unread ? 800 : 600 }}>{threadTitle(app, t)}</span>
+                <span style={{ fontWeight: unread ? 800 : 600 }}>{t.e2ee ? <Icon n="lock" size={12} stroke={2.6} className="lock-ico" /> : null}{threadTitle(app, t)}</span>
                 <span className="sub preview-line" style={unread ? { color: 'var(--fg)', fontWeight: 700 } : undefined}>
                   {typing ? <span className="typing-text">yazıyor…</span> : <span>{seen ? 'Görüldü' : preview}</span>}
                   <span> · {ago(t.at)}</span>
@@ -252,6 +255,7 @@ function MessageBubble({ m, mine, isGroup, showAvatar, showName, gap, onMenu, on
   else if (media && media.type === 'image') content = <img className="msg-img" src={mediaUrl(media.id)} alt="Gönderilen fotoğraf" draggable="false" onClick={(e) => { e.stopPropagation(); onImage(mediaUrl(media.id)); }} />;
   else if (media && media.type === 'video') content = <video className="msg-img" src={mediaUrl(media.id)} poster={media.thumb ? mediaUrl(media.thumb) : undefined} controls playsInline preload="metadata" />;
   else if (media && media.type === 'audio') content = <div className="bubble voice-wrap"><VoiceNote src={mediaUrl(media.id)} duration={media.duration} seed={m.id} /></div>;
+  else if (m.enc && m.text == null) content = <div className="bubble locked">{m.lock === 'wait' ? '🔒 Açılıyor…' : m.lock === 'old' ? '🔒 Bu mesaj bu cihaz eklenmeden önce gönderildi; burada açılamıyor.' : '🔒 Bu mesaj açılamadı.'}</div>;
   else content = <div className={'bubble' + (onlyEmoji ? ' emoji' : '')}>{m.text}</div>;
   const caption = !m.unsent && m.text && (m.media || m.post) ? <div className="bubble" style={{ marginTop: 4 }}>{m.text}</div> : null;
   return (
@@ -362,6 +366,8 @@ export function ChatScreen({ tid }) {
   const typingTimer = useRef(null);
   const stick = useRef(true);
   const isGroup = !!(thread && thread.isGroup);
+  const secret = !!(thread && thread.e2ee);
+  const [codeOpen, setCodeOpen] = useState(false);
   const other = thread && !isGroup ? app.otherOf(thread) : null;
   const typing = thread ? app.typingIn(tid, other) : false;
   const isReq = thread ? app.isRequest(thread) : false;
@@ -404,6 +410,7 @@ export function ChatScreen({ tid }) {
     return () => { alive = false; off(); };
   }, [tid]);
 
+  useEffect(() => { if (secret) app.decryptMessages(msgs); }, [msgs, secret]);
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stick.current) el.scrollTo({ top: el.scrollHeight, behavior: msgs.length > 1 ? 'smooth' : 'auto' });
@@ -451,9 +458,27 @@ export function ChatScreen({ tid }) {
       return;
     }
     setText('');
+    if (secret) {
+      stick.current = true;
+      const ok = await app.sendSecret(tid, t, replyTo);
+      if (ok) setReplyTo(null); else setText(t);
+      return;
+    }
     const ok = await send({ text: t });
     if (!ok) setText(t);
   };
+  // şifreli mesajları bu cihazda çözülmüş haliyle göster
+  const view = !secret ? msgs : msgs.map((m) => {
+    if (!m.enc || m.unsent) return m;
+    const pl = app.plain[m.id];
+    const x = { ...m, text: pl && pl.t != null ? pl.t : null, lock: pl ? (pl.err || null) : 'wait' };
+    if (m.replyTo && m.replyTo.id) {
+      const q = msgs.find((y) => y.id === m.replyTo.id);
+      const qp = q && app.plain[q.id];
+      x.replyTo = { id: m.replyTo.id, from: q ? q.from : null, text: q && q.unsent ? 'Mesaj geri alındı' : qp && qp.t != null ? qp.t.slice(0, 80) : '🔒' };
+    }
+    return x;
+  });
 
   if (!thread) {
     return (
@@ -480,12 +505,13 @@ export function ChatScreen({ tid }) {
       <TopBar back line left={(
         <button className="row" style={{ padding: 0, minWidth: 0 }} onClick={() => (isGroup ? app.push({ type: 'groupinfo', tid }) : app.openUser(other))}>
           <ThreadAvatar t={thread} size={36} />
-          <span className="grow"><span className="uname">{threadTitle(app, thread)}</span><span className="sub">{sub}</span></span>
+          <span className="grow"><span className="uname">{secret ? <Icon n="lock" size={13} stroke={2.6} /> : null}{threadTitle(app, thread)}</span><span className="sub">{secret && !typing ? 'Uçtan uca şifreli' : sub}</span></span>
         </button>
       )} right={isGroup ? <button className="icon-btn" aria-label="Grup bilgisi" onClick={() => app.push({ type: 'groupinfo', tid })}><Icon n="info" /></button>
         : <button className="icon-btn" aria-label="Sohbet seçenekleri" onClick={() => app.setSheet({
           items: [
             { label: 'Profili gör', icon: 'user', onClick: () => app.openUser(other) },
+            secret ? { label: 'Güvenlik kodunu gör', icon: 'lock', onClick: () => setCodeOpen(true) } : { label: 'Şifreli sohbet başlat', icon: 'lock', onClick: () => app.openSecretChatWith(other) },
             { label: (app.myMember(thread) || {}).muted ? 'Bildirimleri aç' : 'Sessize al', icon: 'volOff', onClick: () => app.muteThread(thread, !(app.myMember(thread) || {}).muted) },
             { label: app.blocks[other] ? 'Engeli kaldır' : 'Engelle', icon: 'shield', danger: !app.blocks[other], onClick: () => (app.blocks[other] ? app.unblock(other) : app.block(other)) },
             { label: 'Şikayet et', icon: 'flag', danger: true, onClick: () => app.openReport('user', other) },
@@ -499,14 +525,21 @@ export function ChatScreen({ tid }) {
             <b>{threadTitle(app, thread)}</b>
             {isGroup ? <span className="sub">{memberCount} kişi · Rozstram grubu</span> : <span className="sub">@{app.nameOf(other)} · {p.private ? 'Gizli hesap' : 'Rozstram'}</span>}
             <button className="btn small" style={{ marginTop: 8 }} onClick={() => (isGroup ? app.push({ type: 'groupinfo', tid }) : app.openUser(other))}>{isGroup ? 'Grubu gör' : 'Profili gör'}</button>
+            {secret ? (
+              <div className="e2ee-banner">
+                <Icon n="lock" size={18} stroke={2.4} />
+                <span>Mesajlar uçtan uca şifreli. Sen ve @{app.nameOf(other)} dışında kimse, Rozstram bile okuyamaz. Şifreli sohbette şimdilik yazı ve emoji gönderilir.</span>
+                <button className="text-btn" onClick={() => setCodeOpen(true)}>Güvenlik kodu</button>
+              </div>
+            ) : null}
           </div>
         ) : <button className="load-older" onClick={loadOlder}>Daha eski mesajlar</button>}
         {loading && !msgs.length ? <div style={{ display: 'grid', placeItems: 'center', padding: 20 }}><Spinner /></div> : null}
         <div className="bubbles">
-          {msgs.map((m, i) => {
+          {view.map((m, i) => {
             const mine = m.from === app.me.id;
-            const prev = msgs[i - 1];
-            const next = msgs[i + 1];
+            const prev = view[i - 1];
+            const next = view[i + 1];
             const stamp = !prev || m.at - prev.at > 36e5;
             const lastOfRun = !next || next.from !== m.from || next.at - m.at > 36e5;
             const firstOfRun = !prev || prev.from !== m.from || stamp;
@@ -549,16 +582,17 @@ export function ChatScreen({ tid }) {
             <VoiceRecorder onCancel={() => setRecording(false)} onSend={async (blob, dur) => { setRecording(false); await send({ duration: dur }, blob); }} />
           ) : (
             <div className="chat-input">
-              <button className="cam" aria-label="Fotoğraf ya da video gönder" onClick={() => fileRef.current && fileRef.current.click()}><Icon n="camera" size={20} /></button>
+              {secret ? <span className="cam lock" aria-hidden="true"><Icon n="lock" size={18} stroke={2.4} /></span>
+                : <button className="cam" aria-label="Fotoğraf ya da video gönder" onClick={() => fileRef.current && fileRef.current.click()}><Icon n="camera" size={20} /></button>}
               <input ref={fileRef} id="chat-file" type="file" accept="image/*,video/*" hidden onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) snapshotFile(f).then((c) => send({}, c), () => app.toast('Bu dosya okunamadı. Telefonuna indirip tekrar seç.')); }} />
-              <textarea id="chat-input" rows={1} placeholder={editing ? 'Mesajı düzenle…' : 'Mesaj…'} value={text} maxLength={2000} onChange={(e) => onType(e.target.value)}
+              <textarea id="chat-input" rows={1} placeholder={editing ? 'Mesajı düzenle…' : secret ? 'Şifreli mesaj…' : 'Mesaj…'} value={text} maxLength={2000} onChange={(e) => onType(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } }} />
               {text.trim()
                 ? <button className="text-btn" onClick={sendText}>{editing ? 'Kaydet' : 'Gönder'}</button>
                 : (
                   <Fragment>
-                    {typeof MediaRecorder !== 'undefined' ? <button aria-label="Sesli mesaj kaydet" onClick={() => setRecording(true)}><Icon n="mic" size={24} /></button> : null}
-                    <button aria-label="Kalp gönder" onClick={() => send({ text: '❤️' })}><Icon n="heart" size={26} /></button>
+                    {typeof MediaRecorder !== 'undefined' && !secret ? <button aria-label="Sesli mesaj kaydet" onClick={() => setRecording(true)}><Icon n="mic" size={24} /></button> : null}
+                    <button aria-label="Kalp gönder" onClick={() => (secret ? app.sendSecret(tid, '❤️', null) : send({ text: '❤️' }))}><Icon n="heart" size={26} /></button>
                   </Fragment>
                 )}
             </div>
@@ -575,13 +609,14 @@ export function ChatScreen({ tid }) {
           <div className="react-menu" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { setReplyTo(menu); setEditing(null); setMenu(null); }}>Yanıtla <Icon n="reply" size={18} /></button>
             {menu.text ? <button onClick={async () => { const ok = await copyText(menu.text); app.toast(ok ? 'Kopyalandı' : 'Kopyalanamadı'); setMenu(null); }}>Kopyala <Icon n="copy" size={18} /></button> : null}
-            {menu.from === app.me.id && menu.text && !menu.media && !menu.post && Date.now() - menu.at < EDIT_WINDOW
+            {menu.from === app.me.id && menu.text && !menu.enc && !menu.media && !menu.post && Date.now() - menu.at < EDIT_WINDOW
               ? <button onClick={() => { setEditing(menu); setReplyTo(null); setText(menu.text); setMenu(null); }}>Düzenle <Icon n="edit" size={18} /></button> : null}
             {menu.from === app.me.id ? <button className="danger" onClick={() => { app.unsendMessage(tid, menu); setMenu(null); }}>Geri al <Icon n="undo" size={18} /></button>
               : <button className="danger" onClick={() => { app.openReport('message', menu.id); setMenu(null); }}>Şikayet et <Icon n="flag" size={18} /></button>}
           </div>
         </div>
       ) : null}
+      {codeOpen ? <SafetyCodeSheet uid={other} onClose={() => setCodeOpen(false)} /> : null}
       {lightbox ? (
         <div className="lightbox" onClick={() => setLightbox(null)} role="dialog" aria-label="Fotoğraf">
           <img src={lightbox} alt="" />
@@ -623,5 +658,34 @@ export function GroupInfoScreen({ tid }) {
         </div>
       </div>
     </Fragment>
+  );
+}
+
+/* ================================================================ güvenlik kodu (şifreli sohbet) */
+function SafetyCodeSheet({ uid, onClose }) {
+  const app = useApp();
+  const [code, setCode] = useState(null);
+  const [devs, setDevs] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const list = await keysFor(app.sb, [app.me.id, uid], true).catch(() => []);
+      const c = list.length ? await safetyCode(list) : null;
+      if (alive) { setDevs(list); setCode(c); }
+    })();
+    return () => { alive = false; };
+  }, [uid]);
+  return (
+    <Sheet onClose={onClose} title="Güvenlik kodu" z={70}>
+      <div className="g sheet-body safety">
+        <p className="sub">Bu kodu @{app.nameOf(uid)} ile yüz yüze ya da başka bir yoldan karşılaştırın. İki telefonda da aynıysa mesajlarınız sadece sizin cihazlarınızda açılıyor demektir.</p>
+        {code ? <div className="safety-code" id="safety-code">{code.map((g, i) => <b key={i}>{g}</b>)}</div> : <div className="center-pad"><Spinner /></div>}
+        <div className="set-head">Cihazlar</div>
+        {devs.map((d) => (
+          <div className="dev-row" key={d.id}><Avatar uid={d.user_id} size={26} /><span className="grow"><b>{app.nameOf(d.user_id)}</b><span className="sub">{d.label || 'Cihaz'}</span></span></div>
+        ))}
+        <p className="sub" style={{ paddingBlock: '10px 16px' }}>Yeni bir cihazdan giriş yapılırsa kod değişir. O cihaz, eklenmeden önceki şifreli mesajları açamaz.</p>
+      </div>
+    </Sheet>
   );
 }

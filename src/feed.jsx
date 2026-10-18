@@ -4,8 +4,8 @@ import { COMMENT_EMOJIS, ago, fmt, haptic, isOn, mediaUrl, onKeys, postFilter, s
 import { MusicTag, useMusic } from './player.jsx';
 import {
   Avatar, AvatarStack, Empty, FollowButton, HeartBurst, Icon, Mark, PersonRow, RichText, Sheet, SkeletonPost, TopBar, UName, Vid,
-  useInView, useLongPress, useTaps,
-} from './ui.jsx';
+  useInView, useLongPress, useTaps, SensitiveCover } from './ui.jsx';
+import { FeedPrompt } from './recap.jsx';
 
 /* ================================================================ ana sayfa */
 export function HomeScreen({ live }) {
@@ -65,7 +65,7 @@ export function HomeScreen({ live }) {
               <Icon n="heart" />{app.unreadActivity ? <span className="dot" /> : null}
             </button>
             <button className="icon-btn badge-wrap" aria-label="Mesajlar" onClick={() => app.push({ type: 'inbox' })}>
-              <Icon n="send" />{app.unreadThreads ? <span className="badge">{app.unreadThreads}</span> : null}
+              <Icon n="send" />{app.unreadThreads + app.snapNew ? <span className="badge">{app.unreadThreads + app.snapNew}</span> : null}
             </button>
           </Fragment>
         )} />
@@ -73,6 +73,7 @@ export function HomeScreen({ live }) {
         <span style={{ transform: 'rotate(' + pull * 3 + 'deg) scale(' + Math.min(1, pull / 60) + ')' }}><Mark size={26} /></span>
       </div>
       <StoriesBar />
+      {app.loaded.posts ? <FeedPrompt /> : null}
       {!app.loaded.posts ? <Fragment><SkeletonPost /><SkeletonPost /></Fragment> : null}
       {app.loaded.posts && app.feedMode === 'following' && !main.length && rest.length ? (
         <div className="g feed-note">Takip ettiğin hesapların paylaşımı yok. Aşağıda senin için seçtiklerimiz var.</div>
@@ -191,7 +192,8 @@ function PostMedia({ post, live, onDouble, tagged }) {
   const filter = postFilter(post);
   const cur = media[idx];
   const hasSound = !!(post.music || (cur && cur.type === 'video'));
-  useMusic(post.music, live && inView, 'post:' + post.id);
+  const covered = app.covered(post);
+  useMusic(post.music, live && inView && !covered, 'post:' + post.id);
   const tap = useTaps(hasSound ? () => app.setSound(!app.sound) : null, () => { setBurst((b) => b + 1); haptic(12); onDouble(); });
   const showCounter = () => { setCounterOn(true); clearTimeout(counterTimer.current); counterTimer.current = setTimeout(() => setCounterOn(false), 2600); };
   useEffect(() => { showCounter(); return () => clearTimeout(counterTimer.current); }, []);
@@ -208,7 +210,7 @@ function PostMedia({ post, live, onDouble, tagged }) {
           {media.map((m, i) => (
             <div className="slide" key={i}>
               {m.type === 'video'
-                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx} onProgress={i === idx ? setProg : undefined} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
+                ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={live && inView && i === idx && !covered} onProgress={i === idx ? setProg : undefined} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
                 : <img className="fill" src={mediaUrl(m.id)} alt={post.caption || 'Gönderi'} loading="lazy" decoding="async" style={filter ? { filter } : undefined} draggable="false" />}
             </div>
           ))}
@@ -221,6 +223,7 @@ function PostMedia({ post, live, onDouble, tagged }) {
         ) : null}
         {cur && cur.type === 'video' ? <div className="vbar"><b style={{ width: prog * 100 + '%' }} /></div> : null}
         <HeartBurst k={burst} />
+        <SensitiveCover post={post} />
         {tagged && tagged.length ? (
           <button className="tag-btn" aria-label="Etiketlenen kişiler" onClick={(e) => { e.stopPropagation(); app.openLikes(tagged, 'Bu gönderideki kişiler'); }}><Icon n="user" size={15} /></button>
         ) : null}
@@ -365,6 +368,7 @@ export function GridTile({ post, tall, reel, pinned }) {
         : m.type === 'video' ? <video className="fill" src={mediaUrl(m.id) + '#t=0.5'} muted playsInline preload="metadata" /> : null}
       {pinned ? <Icon n="thumb" size={18} className="badge-ico" fill /> : m.type === 'video' ? <Icon n="reels" size={20} className="badge-ico" /> : (post.media || []).length > 1 ? <Icon n="multi" size={20} className="badge-ico" /> : null}
       {reel ? <span className="stat"><Icon n="play" size={13} fill />{fmt(post.views || 0)}</span> : null}
+      <SensitiveCover post={post} compact />
     </button>
   );
 }
@@ -381,8 +385,9 @@ export function PeekModal({ postId, onClose }) {
       <div className="peek-card" onClick={(e) => e.stopPropagation()}>
         <div className="hd"><Avatar uid={post.author} size={30} /><UName uid={post.author} onClick={() => { onClose(); app.openUser(post.author); }} /></div>
         <div className="media" style={{ aspectRatio: String(Math.max(0.8, m.aspect || 1)) }}>
-          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
+          {m.type === 'video' ? <Vid src={mediaUrl(m.id)} poster={m.thumb ? mediaUrl(m.thumb) : undefined} filter={filter} playing={!app.covered(post)} onWatched={() => app.viewPost(post)} forceMute={!!post.music} />
             : <img className="fill" src={mediaUrl(m.id)} alt="" style={filter ? { filter } : undefined} />}
+          <SensitiveCover post={post} />
         </div>
         <div className="ft">
           <button className={'act' + (liked ? ' liked' : '')} onClick={() => app.setLike(post, !liked)} aria-label="Beğen"><Icon n="heart" fill={liked} /></button>
