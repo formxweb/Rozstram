@@ -667,7 +667,7 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .spinner { display: inline-block; width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--soft-2); border-top-color: var(--g3); animation: spin 0.75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading { height: 100%; display: grid; place-items: center; }
-.toast { position: absolute; left: 50%; bottom: calc(var(--nav-h) + 14px); z-index: 95; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 11px 16px; border-radius: 14px; font-size: 14px; font-weight: 700; box-shadow: var(--shadow-lg); max-width: calc(100% - 32px); text-align: center; animation: toastin 0.35s var(--spring); display: flex; gap: 12px; align-items: center; }
+.toast { position: absolute; left: 50%; bottom: calc(var(--nav-h) + 14px); z-index: 95; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 11px 16px; border-radius: 14px; font-size: 14px; font-weight: 700; box-shadow: var(--shadow-lg); width: max-content; max-width: calc(100% - 32px); text-align: center; animation: toastin 0.35s var(--spring); display: flex; gap: 12px; align-items: center; }
 .toast button { color: var(--g1); font-weight: 800; }
 @keyframes toastin { from { transform: translate(-50%, 24px); opacity: 0; } }
 
