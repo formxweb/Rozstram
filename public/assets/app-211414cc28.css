@@ -1137,3 +1137,16 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .fy.compact { padding-block: 8px 18px; }
 .fy-sheet .fy-year.on, .fy-sheet .fy-go { background: var(--fg); color: var(--bg); }
 .fy-sheet.kid .fy-year.on, .fy-sheet.kid .fy-go { background: var(--grad); color: #fff; }
+.nav .nav-badge { top: 8px; right: calc(50% - 22px); }
+.home-create { margin-right: 2px; }
+
+/* ---------------------------------------------------------------- yeniden paylaşım */
+.repost-line { display: flex; align-items: center; gap: 6px; padding-block: 8px 0; font-size: 13px; color: var(--muted); font-weight: 600; text-align: left; }
+.repost-line b { color: var(--fg); font-weight: 800; }
+.repost-line svg { color: #12b886; }
+.act.repost.on { color: #12b886; }
+.act.repost.on .icon { animation: pop .35s var(--spring); }
+.act.repost-count { color: var(--muted); }
+.reel .side .repost.on { color: #3ee0a7; }
+.reel-repost { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 8px; padding: 4px 10px 4px 8px; border-radius: 999px; background: rgba(0, 0, 0, .35); color: #fff; font-size: 12.5px; font-weight: 700; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.reel-repost svg { color: #3ee0a7; }

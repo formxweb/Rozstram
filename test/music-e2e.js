@@ -23,7 +23,7 @@ const trackPlays = () => {
     await A.waitForSelector('nav');
 
     // Reels + müzik
-    await A.locator('nav button[aria-label="Oluştur"]').click();
+    await A.locator('nav button[aria-label="Ana sayfa"]').click(); await A.locator('#home-create').click();
     await top(A).getByRole('button', { name: 'REELS', exact: true }).click();
     await A.setInputFiles('#create-file', IMG + 'reel.webm');
     await text(A, 'Filtre');
@@ -52,7 +52,7 @@ const trackPlays = () => {
     ok('müzikli Reels paylaşıldı');
 
     // yazı hikayesi + müzik
-    await A.locator('nav button[aria-label="Oluştur"]').click();
+    await A.locator('nav button[aria-label="Ana sayfa"]').click(); await A.locator('#home-create').click();
     await top(A).getByRole('button', { name: 'HİKAYE', exact: true }).click();
     await top(A).getByRole('button', { name: 'Yazı' }).click();
     await A.fill('#story-text', 'Kahve zamanı ' + t);

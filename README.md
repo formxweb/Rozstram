@@ -37,6 +37,14 @@ Yeni yönetici eklemek: Supabase SQL Editor'de
 - Hassas içerik: gönderi oluştururken ya da ••• menüsünden işaretlenir (yönetici de işaretleyebilir, sahibi bu işareti kaldıramaz).
   Ayarlar → Hassas içerik: Göster / Bulanık / Gizle.
 
+## Alt menü ve yeniden paylaşım
+
+Alt menü: Ana sayfa, Reels, Mesajlar (okunmamış sayısıyla), Keşfet, Profil. Oluştur (+) ana sayfanın üst çubuğunda,
+Reels oluşturma Reels ekranının sağ üstünde.
+Yeniden paylaş: başkasının Reels'inde ya da gönderisinde 🔁 düğmesi. Takipçiler onu akışta ve "Takip edilenler" Reels'inde
+"@kişi yeniden paylaştı" etiketiyle görür; profilde "Yeniden paylaşılanlar" sekmesinde durur; gönderi sahibine bildirim gider.
+Kendi gönderini yeniden paylaşamazsın; tekrar dokununca geri alınır.
+
 ## Şipşak
 
 Mesajlar → Şipşak çek: kamera açılır, çekilen foto filtresiz anında gider (karşılıklı takipleşilen arkadaşlar ya da Yakın Arkadaşlar).
@@ -76,4 +84,5 @@ node test/admin-e2e.js           # yönetici paneli testi
 node test/music-e2e.js           # müzik testi
 node test/ban-e2e.js             # banlama testi
 node test/features-e2e.js        # yaş, hassas içerik, Şipşak, şifreli sohbet, yıl özeti
+node test/repost-e2e.js          # alt menüde Mesajlar, yeniden paylaşım
 ```

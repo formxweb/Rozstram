@@ -17,7 +17,7 @@ const { BASE, IMG, newUser, apiSignup, top, text, wait, sql } = H;
     await P.waitForSelector('nav');
     const tmp = '/var/tmp/roztest/degisen-video.webm';
     fs.copyFileSync(IMG + 'reel.webm', tmp);
-    await P.locator('nav button[aria-label="Oluştur"]').click();
+    await P.locator('nav button[aria-label="Ana sayfa"]').click(); await P.locator('#home-create').click();
     await top(P).getByRole('button', { name: 'REELS', exact: true }).click();
     await P.setInputFiles('#create-file', tmp);
     await text(P, 'Filtre');

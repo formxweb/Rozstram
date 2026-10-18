@@ -45,6 +45,7 @@ export function ActivityScreen() {
     const quote = it.text ? <Fragment>: {it.text}</Fragment> : null;
     switch (it.kind) {
       case 'like': return <Fragment>{who} gönderini beğendi.</Fragment>;
+      case 'repost': return <Fragment>{who} gönderini yeniden paylaştı.</Fragment>;
       case 'comment': return <Fragment>{who} yorum yaptı{quote}</Fragment>;
       case 'reply': return <Fragment>{who} yorumuna yanıt verdi{quote}</Fragment>;
       case 'mention': return <Fragment>{who} bir yorumda senden bahsetti{quote}</Fragment>;

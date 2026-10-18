@@ -58,14 +58,16 @@ export function HomeScreen({ live }) {
   return (
     <div className="scroller" ref={scRef} onScroll={onScroll} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <TopBar hidden={hide}
-        left={<button className="logo-btn" onClick={feedMenu} aria-label="Akışı değiştir"><Mark size={24} /><span className="wordmark">rozstram</span><Icon n="chevDown" size={16} stroke={2.4} /></button>}
+        left={(
+          <Fragment>
+            <button className="icon-btn home-create" id="home-create" aria-label="Oluştur" onClick={() => app.openCreate('post')}><Icon n="plusSq" size={26} /></button>
+            <button className="logo-btn" onClick={feedMenu} aria-label="Akışı değiştir"><Mark size={24} /><span className="wordmark">rozstram</span><Icon n="chevDown" size={16} stroke={2.4} /></button>
+          </Fragment>
+        )}
         right={(
           <Fragment>
             <button className="icon-btn badge-wrap" aria-label="Bildirimler" onClick={() => app.push({ type: 'activity' })}>
               <Icon n="heart" />{app.unreadActivity ? <span className="dot" /> : null}
-            </button>
-            <button className="icon-btn badge-wrap" aria-label="Mesajlar" onClick={() => app.push({ type: 'inbox' })}>
-              <Icon n="send" />{app.unreadThreads + app.snapNew ? <span className="badge">{app.unreadThreads + app.snapNew}</span> : null}
             </button>
           </Fragment>
         )} />
@@ -246,6 +248,7 @@ export function PostCard({ post, live }) {
   const preview = tops.slice(-2);
   const author = app.profiles[post.author] || {};
   const isMine = post.author === app.me.id;
+  const reposted = app.myRepost(post.id);
   const showFollow = !isMine && !app.following.has(post.author) && !app.requested.has(post.author);
   const tagged = (post.tagged || []).filter((u) => app.profiles[u]);
   const like = (v) => { if (v && !liked) setPop((p) => p + 1); app.setLike(post, v); };
@@ -255,6 +258,9 @@ export function PostCard({ post, live }) {
 
   return (
     <article className="post" data-id={post.id}>
+      {post.repostBy ? (
+        <button className="repost-line g" onClick={() => app.openUser(post.repostBy)}><Icon n="repost" size={15} stroke={2.2} /><b>{app.nameOf(post.repostBy)}</b> yeniden paylaştı</button>
+      ) : null}
       {post.removed ? <div className="removed-note"><Icon n="eyeOff" size={16} />Bu gönderi yönetici tarafından kaldırıldı. Sadece sen görebilirsin.</div> : null}
       <div className="post-head g">
         <div className="who">
@@ -283,6 +289,11 @@ export function PostCard({ post, live }) {
             {!post.noComments ? (
               <button className="act" onClick={() => app.openComments(post.id)} aria-label="Yorumlar"><Icon n="comment" />{list.length ? <span>{fmt(list.length)}</span> : null}</button>
             ) : null}
+            {!isMine ? (
+              <button className={'act repost' + (reposted ? ' on' : '')} onClick={() => app.setRepost(post, !reposted)} aria-label={reposted ? 'Yeniden paylaşımı geri al' : 'Yeniden paylaş'} aria-pressed={reposted}>
+                <Icon n="repost" stroke={reposted ? 2.4 : 1.9} />{post.reposts ? <span>{fmt(post.reposts)}</span> : null}
+              </button>
+            ) : post.reposts ? <span className="act repost-count"><Icon n="repost" />{fmt(post.reposts)}</span> : null}
             <button className="act" onClick={() => app.openSend(post)} aria-label="Gönder"><Icon n="send" /></button>
           </div>
           <button className={'act' + (savePop ? ' pop' : '')} key={'s' + savePop} onClick={() => { if (!saved) setSavePop((x) => x + 1); app.setSaved(post.id, !saved); }} aria-label={saved ? 'Kaydedilenlerden çıkar' : 'Kaydet'}>

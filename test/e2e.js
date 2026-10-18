@@ -140,7 +140,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   await wait(300);
   await top(B).locator('header button[aria-label=\"Geri\"]').first().click();
   await wait(300);
-  await B.locator('nav button[aria-label="Oluştur"]').click();
+  await B.locator('nav button[aria-label="Ana sayfa"]').click(); await B.locator('#home-create').click();
   await B.setInputFiles('#create-file', [IMG + 'p1.jpg', IMG + 'p2.jpg']);
   await text(B, 'Filtre');
   await B.getByRole('button', { name: 'Canlı' }).click();
@@ -169,7 +169,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   ok('çift dokunuşla beğeni kaydedildi');
   await A.locator('article.post .ph').filter({ visible: true }).first().click();
   await A.fill('#comment-input', 'Harika olmuş! 😍');
-  await A.getByRole('button', { name: 'Paylaş' }).click();
+  await A.getByRole('button', { name: 'Paylaş', exact: true }).click();
   await text(A, 'Harika olmuş');
   await shot(A, 'yorum');
   await A.locator('.sheet-drag').filter({ visible: true }).first().click({ position: { x: 5, y: 5 } }).catch(() => {});
@@ -201,7 +201,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   ok('Ali mesaj gönderdi');
   await B.waitForSelector('button[aria-label="Mesajlar"] .badge, button[aria-label="Mesajlar"]', { timeout: 8000 });
   await B.locator('button[aria-label="Mesajlar"]').click();
-  await top(B).getByRole('button', { name: /İstekler/ }).click();
+  await B.getByRole('button', { name: /İstekler/ }).filter({ visible: true }).click();
   await text(B, 'Selam Ayşe');
   await shot(B, 'mesaj-istekleri');
   await B.locator('.inbox-row').filter({ visible: true }).first().click();
@@ -264,7 +264,7 @@ async function signup(page, { via, contact, name, pw, username }) {
   ok('hikaye paylaşıldı ve görüntülendi');
 
   /* ---------------------------------------------------------- reels videosu */
-  await A.locator('nav button[aria-label="Oluştur"]').click();
+  await A.locator('nav button[aria-label="Ana sayfa"]').click(); await A.locator('#home-create').click();
   await top(A).getByRole('button', { name: 'REELS', exact: true }).click();
   await A.setInputFiles('#create-file', IMG + 'reel.webm');
   await text(A, 'Filtre');

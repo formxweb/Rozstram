@@ -49,12 +49,19 @@ function ReelItem({ post, live }) {
           <Icon n="heart" fill={liked} size={32} />{post.hideLikes ? '' : fmt(onKeys(post.likes).length)}
         </button>
         {!post.noComments ? <button onClick={() => app.openComments(post.id)} aria-label="Yorumlar"><Icon n="comment" size={31} />{fmt(comments)}</button> : null}
+        {post.author !== app.me.id ? (
+          <button className={'repost' + (app.myRepost(post.id) ? ' on' : '')} onClick={() => app.setRepost(post, !app.myRepost(post.id))}
+            aria-label={app.myRepost(post.id) ? 'Yeniden paylaşımı geri al' : 'Yeniden paylaş'} aria-pressed={app.myRepost(post.id)}>
+            <Icon n="repost" size={30} stroke={app.myRepost(post.id) ? 2.5 : 1.9} />{post.reposts ? fmt(post.reposts) : ''}
+          </button>
+        ) : null}
         <button onClick={() => app.openSend(post)} aria-label="Gönder"><Icon n="send" size={30} /></button>
         <button onClick={() => app.setSaved(post.id, !saved)} aria-label="Kaydet"><Icon n="bookmark" fill={saved} size={29} /></button>
         <button onClick={() => app.postMenu(post)} aria-label="Seçenekler"><Icon n="more" size={26} /></button>
         <button onClick={() => app.openUser(post.author)} aria-label="Ses"><span className={'disc' + (playing ? '' : ' paused')}><img src={app.avatarOf(post.author)} alt="" /></span></button>
       </div>
       <div className="info" style={{ opacity: hold ? 0 : 1, transition: 'opacity .2s' }}>
+        {post.repostBy ? <button className="reel-repost" onClick={() => app.openUser(post.repostBy)}><Icon n="repost" size={14} stroke={2.4} />{app.nameOf(post.repostBy)} yeniden paylaştı</button> : null}
         <div className="who">
           <Avatar uid={post.author} size={34} onClick={() => app.openUser(post.author)} />
           <button className="uname" style={{ color: 'var(--on-night)' }} onClick={() => app.openUser(post.author)}>{app.nameOf(post.author)}</button>

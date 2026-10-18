@@ -63,7 +63,7 @@ async function logout(page) {
   await C.waitForSelector('nav');
   await nav(A, 'Ana sayfa');
   await A.locator('button[aria-label="Mesajlar"]').filter({ visible: true }).click();
-  await top(A).locator('button[aria-label="Yeni mesaj"]').click();
+  await A.locator('button[aria-label="Yeni mesaj"]').filter({ visible: true }).click();
   await top(A).locator('#newmsg-q').fill('a');
   await top(A).locator('.person', { hasText: 'ayse' }).locator('.check-ring').click();
   await top(A).locator('#newmsg-q').fill('can');
@@ -79,7 +79,7 @@ async function logout(page) {
   await nav(C, 'Ana sayfa');
   await C.locator('button[aria-label="Mesajlar"]').filter({ visible: true }).click();
   await text(C, 'Ekip');
-  await top(C).locator('.inbox-row', { hasText: 'Ekip' }).click();
+  await C.locator('.inbox-row', { hasText: 'Ekip' }).filter({ visible: true }).click();
   await text(C, 'Merhaba ekip');
   await C.fill('#chat-input', 'Selam!');
   await top(C).getByRole('button', { name: 'Gönder', exact: true }).click();
@@ -111,21 +111,20 @@ async function logout(page) {
   await top(C).locator('button[aria-label="Grup bilgisi"]').click();
   await text(C, 'Grup bilgisi');
   await shot(C, 'grup-bilgisi');
-  await back(C);
-  await back(C);
-  await back(A);
+  for (const P of [C, A]) {
+    for (let i = 0; i < 4 && (await P.locator('.page header button[aria-label="Geri"]').count()); i++) { await back(P); await wait(250); }
+    await nav(P, 'Mesajlar');
+  }
 
   /* ---------------------------------------------------------- not */
-  await top(A).locator('.note-item').first().click();
+  await A.locator('.note-item').filter({ visible: true }).first().click();
   await A.fill('#note-input', 'Kahve içen var mı? ☕');
   await A.getByRole('button', { name: 'Paylaş', exact: true }).click();
   await wait(500);
-  await back(A);
   await B.locator('button[aria-label="Mesajlar"]').filter({ visible: true }).click();
   await text(B, 'Kahve içen var mı');
   await shot(B, 'notlar');
   ok('not paylaşıldı, Ayşe’nin mesaj kutusunda göründü');
-  await back(B);
 
   /* ---------------------------------------------------------- yakın arkadaş hikayesi */
   await nav(A, 'Profil');

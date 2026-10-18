@@ -72,6 +72,8 @@ export function rowPost(r, prev) {
     boost: (prev && prev.boost) || 0,
     removed: !!(prev && prev.removed),
     music: r.music || null,
+    sensitive: !!r.sensitive, sensitiveAdmin: !!r.sensitive_admin,
+    reposts: (prev && prev.reposts) || 0,
   };
 }
 

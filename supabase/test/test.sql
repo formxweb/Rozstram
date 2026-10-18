@@ -473,6 +473,27 @@ select t.err($q$insert into public.device_keys (public_key) values ('{"kty":"EC"
 select t.as_user('00000000-0000-0000-0000-0000000000e3');
 select t.ok((select count(*) from public.device_keys where user_id = '00000000-0000-0000-0000-0000000000e2') = 10, 'açık anahtarlar okunabilir');
 
+\echo '== yeniden paylaşım'
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.err($q$insert into public.reposts (post_id) values ('10000000-0000-0000-0000-0000000000e2')$q$, 'own_post', 'kendi gönderini yeniden paylaşamazsın');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+insert into public.reposts (post_id) values ('10000000-0000-0000-0000-0000000000e1');
+select t.err($q$insert into public.reposts (post_id) values ('10000000-0000-0000-0000-0000000000e1')$q$, 'duplicate|unique', 'aynı gönderi iki kez yeniden paylaşılamaz');
+select t.err($q$insert into public.reposts (user_id, post_id) values ('00000000-0000-0000-0000-0000000000e1', '10000000-0000-0000-0000-0000000000e2')$q$, 'row-level security', 'başkası adına yeniden paylaşılamaz');
+select t.ok((public.get_posts(array['10000000-0000-0000-0000-0000000000e1'::uuid]) -> 'posts' -> 0 ->> 'reposts')::int = 1, 'gönderide yeniden paylaşım sayısı');
+select t.ok(jsonb_array_length(public.user_posts('00000000-0000-0000-0000-0000000000e3') -> 'reposts') = 1, 'profilde yeniden paylaşılanlar');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok((select count(*) from public.notifications where user_id = auth.uid() and kind = 'repost') = 1, 'gönderi sahibine yeniden paylaşım bildirimi');
+select t.as_user('00000000-0000-0000-0000-0000000000e1');
+insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-0000000000e3');
+select t.ok(exists (select 1 from jsonb_array_elements(public.bootstrap() -> 'reposts') r where r ->> 1 = '10000000-0000-0000-0000-0000000000e1'), 'takip ettiğinin yeniden paylaşımı akışa gelir');
+delete from public.reposts where user_id = '00000000-0000-0000-0000-0000000000e3';
+select t.ok((select count(*) from public.reposts where user_id = '00000000-0000-0000-0000-0000000000e3') = 1, 'başkasının yeniden paylaşımı silinemez');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+delete from public.reposts where post_id = '10000000-0000-0000-0000-0000000000e1';
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok((select count(*) from public.notifications where user_id = auth.uid() and kind = 'repost') = 0, 'geri alınınca bildirim de kaybolur');
+
 \echo '== yıl özeti ve en sevdiğin yıl'
 select t.as_user('00000000-0000-0000-0000-0000000000e3');
 insert into public.post_likes (post_id) values ('10000000-0000-0000-0000-0000000000e1');

@@ -328,6 +328,16 @@ create table if not exists public.favorite_years (
 );
 create index if not exists favorite_years_year_idx on public.favorite_years (year);
 
+-- Yeniden paylaşım: başkasının gönderisini/Reels'ini kendi takipçilerinin akışına taşır
+create table if not exists public.reposts (
+  user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  post_id    uuid not null references public.posts (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, post_id)
+);
+create index if not exists reposts_post_idx on public.reposts (post_id);
+create index if not exists reposts_user_idx on public.reposts (user_id, created_at desc);
+
 -- =====================================================================
 -- 2) YARDIMCI FONKSİYONLAR
 -- =====================================================================
@@ -437,6 +447,7 @@ create or replace function public.notif_live(k text, a uuid, u uuid, p uuid, c u
 language sql stable security definer set search_path = public as $$
   select case k
     when 'like' then exists (select 1 from public.post_likes where post_id = p and user_id = a)
+    when 'repost' then exists (select 1 from public.reposts where post_id = p and user_id = a)
     when 'clike' then exists (select 1 from public.comment_likes where comment_id = c and user_id = a)
     when 'slike' then exists (select 1 from public.story_likes where story_id = s and user_id = a)
     when 'request' then exists (select 1 from public.follows where follower = a and following = u and status = 'pending')
@@ -690,6 +701,26 @@ end $$;
 create or replace trigger post_likes_after after insert on public.post_likes
   for each row execute function public.post_likes_after();
 
+-- yeniden paylaşım: kendi gönderini yeniden paylaşamazsın; gönderi sahibine bildirim gider
+create or replace function public.reposts_before() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.created_at := now();
+  if exists (select 1 from public.posts where id = new.post_id and author = new.user_id) then raise exception 'own_post'; end if;
+  return new;
+end $$;
+create or replace trigger reposts_before before insert on public.reposts
+  for each row execute function public.reposts_before();
+
+create or replace function public.reposts_after() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.notify((select author from public.posts where id = new.post_id), new.user_id, 'repost', new.post_id);
+  return null;
+end $$;
+create or replace trigger reposts_after after insert on public.reposts
+  for each row execute function public.reposts_after();
+
 -- yorum: yanıtlar tek seviye, yazar sabit
 create or replace function public.comments_before() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -845,7 +876,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['profiles', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_likes',
-                           'follows', 'threads', 'thread_members', 'messages', 'message_reactions'] loop
+                           'follows', 'threads', 'thread_members', 'messages', 'message_reactions', 'reposts'] loop
     execute format('create or replace trigger aa_ban_guard before insert or update on public.%I for each row execute function public.ban_guard()', t);
   end loop;
 end $$;
@@ -1430,7 +1461,8 @@ language sql stable as $$
     'likes', coalesce((select jsonb_object_agg(l.user_id, public.ms(l.created_at)) from public.post_likes l where l.post_id = p.id), '{}'::jsonb),
     'views', public.view_count(p.id),
     'boost', public.boost_of(p.id), 'removed', public.post_removed(p.id), 'music', p.music,
-    'sensitive', p.sensitive, 'sensitiveAdmin', p.sensitive_admin
+    'sensitive', p.sensitive, 'sensitiveAdmin', p.sensitive_admin,
+    'reposts', (select count(*) from public.reposts r where r.post_id = p.id)
   );
 $$;
 
@@ -1483,10 +1515,18 @@ $$;
 create or replace function public.bootstrap() returns jsonb
 language sql stable set search_path = public as $$
   with me as (select auth.uid() as id),
+  rp as (
+    select r.* from public.reposts r
+    where r.created_at > now() - interval '30 days'
+      and (r.user_id = (select id from me)
+           or exists (select 1 from public.follows f where f.follower = (select id from me) and f.following = r.user_id and f.status = 'accepted'))
+    order by r.created_at desc limit 500
+  ),
   ids as (
     select x.id from (select p.id from public.posts p order by p.created_at desc limit 400) x
     union select p.id from public.posts p where p.author = (select id from me)
     union select s.post_id from public.saves s where s.user_id = (select id from me)
+    union select rp.post_id from rp
   ),
   feed as (select p.* from public.posts p where p.id in (select id from ids))
   select jsonb_build_object(
@@ -1504,6 +1544,8 @@ language sql stable set search_path = public as $$
     'blocks', coalesce((select jsonb_agg(b.blocked) from public.blocks b where b.blocker = auth.uid()), '[]'::jsonb),
     'mutes', coalesce((select jsonb_agg(m.target) from public.mutes m where m.owner = auth.uid()), '[]'::jsonb),
     'closeFriends', coalesce((select jsonb_agg(c.friend) from public.close_friends c where c.owner = auth.uid()), '[]'::jsonb),
+    'reposts', coalesce((select jsonb_agg(jsonb_build_array(r.user_id, r.post_id, public.ms(r.created_at))) from rp r
+                         where exists (select 1 from feed f where f.id = r.post_id)), '[]'::jsonb),
     'viewed', public.my_views(),
     'isAdmin', public.is_admin(),
     'ban', public.my_ban(),
@@ -1527,9 +1569,15 @@ $$;
 
 create or replace function public.user_posts(uid uuid) returns jsonb
 language sql stable set search_path = public as $$
-  with ps as (select * from public.posts where author = uid or uid = any (tagged) order by created_at desc limit 300)
+  with rp as (select * from public.reposts r where r.user_id = uid order by r.created_at desc limit 200),
+  ps as (
+    (select * from public.posts where author = uid or uid = any (tagged) order by created_at desc limit 300)
+    union select p.* from public.posts p where p.id in (select post_id from rp)
+  )
   select jsonb_build_object(
     'posts', coalesce((select jsonb_agg(public.post_json(p)) from ps p), '[]'::jsonb),
+    'reposts', coalesce((select jsonb_agg(jsonb_build_array(r.user_id, r.post_id, public.ms(r.created_at))) from rp r
+                         where exists (select 1 from ps where ps.id = r.post_id)), '[]'::jsonb),
     'comments', coalesce((select jsonb_agg(public.comment_json(c) order by c.created_at) from public.comments c where c.post_id in (select id from ps)), '[]'::jsonb)
   );
 $$;
@@ -1600,6 +1648,19 @@ alter table public.snaps             enable row level security;
 alter table public.snap_recipients   enable row level security;
 alter table public.device_keys       enable row level security;
 alter table public.favorite_years    enable row level security;
+alter table public.reposts           enable row level security;
+
+-- yeniden paylaşımlar: gönderiyi ve paylaşanı görebiliyorsan görürsün
+drop policy if exists reposts_select on public.reposts;
+create policy reposts_select on public.reposts for select to authenticated using (
+  exists (select 1 from public.posts p where p.id = post_id) and (user_id = auth.uid() or public.can_view(user_id))
+);
+drop policy if exists reposts_insert on public.reposts;
+create policy reposts_insert on public.reposts for insert to authenticated with check (
+  user_id = auth.uid() and exists (select 1 from public.posts p where p.id = post_id and not p.archived)
+);
+drop policy if exists reposts_delete on public.reposts;
+create policy reposts_delete on public.reposts for delete to authenticated using (user_id = auth.uid());
 
 -- şipşak: gönderen kendi şipşağını görür/geri alır; alıcılar şipşağı my_snaps() ile alır
 drop policy if exists snaps_select on public.snaps;
@@ -1811,6 +1872,7 @@ revoke insert, update on public.snaps from authenticated;
 revoke insert, update, delete on public.snap_recipients from authenticated;
 revoke update on public.device_keys from authenticated;
 revoke all on public.favorite_years from authenticated;
+revoke update on public.reposts from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1857,7 +1919,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views',
-                           'story_likes', 'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'] loop
+                           'story_likes', 'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients', 'reposts'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when others then null;

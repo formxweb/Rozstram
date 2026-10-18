@@ -54,6 +54,8 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [ban, setBan] = useState(null);
   const [snaps, setSnaps] = useState({ inbox: [], sent: [] });
+  const [reposts, setReposts] = useState({});
+  const repostsRef = useRef(reposts); repostsRef.current = reposts;
   const [snapView, setSnapView] = useState(null);
   const [favoriteYear, setFavoriteYearState] = useState(null);
   const [recap, setRecap] = useState(null);
@@ -91,6 +93,7 @@ function App() {
 
   const checkBanRef = useRef(noop);
   const loadSnapsRef = useRef(noop);
+  const ensurePostRef = useRef(noop);
   const toast = useCallback((text, action) => {
     if (text === BAN_TEXT) checkBanRef.current();
     setToastMsg({ text, action, k: Date.now() });
@@ -166,6 +169,7 @@ function App() {
     setIsAdmin(!!data.isAdmin);
     setBan(data.ban || null);
     setSnaps(data.snaps || { inbox: [], sent: [] });
+    setReposts(() => { const m = {}; (data.reposts || []).forEach(([u, p, at]) => { m[u + ':' + p] = { u, p, at }; }); return m; });
     setFavoriteYearState(data.favoriteYear || null);
     setSettings(data.settings || {});
     setRankEpoch((e) => e + 1);
@@ -297,6 +301,24 @@ function App() {
       case 'snap_recipients':
         loadSnapsRef.current();
         break;
+      case 'reposts': {
+        const r = ev === 'DELETE' ? old : nw;
+        if (!r || !r.user_id || !r.post_id) break;
+        const k = r.user_id + ':' + r.post_id;
+        const had = !!repostsRef.current[k];
+        const bump = (d) => setPosts((pm) => (pm[r.post_id] ? { ...pm, [r.post_id]: { ...pm[r.post_id], reposts: Math.max(0, (pm[r.post_id].reposts || 0) + d) } } : pm));
+        if (ev === 'DELETE') {
+          if (had) { repostsRef.current = omit(repostsRef.current, k); setReposts((m) => omit(m, k)); bump(-1); }
+        } else if (!had) {
+          const row = { u: r.user_id, p: r.post_id, at: toMs(nw.created_at) || Date.now() };
+          repostsRef.current = { ...repostsRef.current, [k]: row };
+          setReposts((m) => ({ ...m, [k]: row }));
+          bump(1);
+          if (!postsRef.current[r.post_id]) ensurePostRef.current(r.post_id);
+        }
+        if (ev === 'DELETE') dropNotifs((n) => n.kind === 'repost' && n.post === r.post_id && n.actor === r.user_id);
+        break;
+      }
       case 'notifications':
         if (ev === 'DELETE') setNotifs((l) => l.filter((n) => n.id !== old.id));
         else if (ev === 'INSERT') setNotifs((l) => [rowNotification(nw)].concat(l.filter((n) => n.id !== nw.id)));
@@ -311,7 +333,7 @@ function App() {
   useEffect(() => {
     if (!sb || !me.id || !loaded) return undefined;
     const tables = ['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views', 'story_likes',
-      'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'];
+      'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients', 'reposts'];
     let ch = sb.channel('db-' + me.id);
     tables.forEach((t) => {
       ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, (p) => onDb(t, p.eventType, p.new || {}, p.old || {}));
@@ -432,18 +454,38 @@ function App() {
   const justShared = (p) => p.author === me.id && Date.now() - p.at < 10 * 60e3;
   const ownFirst = (list, ranked) => list.filter(justShared).sort((a, b) => b.at - a.at).concat(ranked(list.filter((p) => !justShared(p))));
 
+  // yeniden paylaşımlar: gönderi → onu en son yeniden paylaşan, takip ettiğim kişi
+  const repostOf = useMemo(() => {
+    const m = {};
+    Object.keys(reposts).forEach((k) => {
+      const r = reposts[k];
+      if (r.u === me.id || !following.has(r.u) || blocks[r.u] || mutes[r.u]) return;
+      if (!m[r.p] || m[r.p].at < r.at) m[r.p] = { by: r.u, at: r.at };
+    });
+    return m;
+  }, [reposts, following, me.id, blocks, mutes]);
+  const withRepost = useCallback((p) => (repostOf[p.id] && p.author !== me.id && !following.has(p.author)
+    ? { ...p, repostBy: repostOf[p.id].by, repostAt: repostOf[p.id].at } : p), [repostOf, me.id, following]);
+  const myRepost = useCallback((pid) => !!reposts[me.id + ':' + pid], [reposts, me.id]);
+  const repostsBy = useCallback((uid) => Object.keys(reposts).map((k) => reposts[k]).filter((r) => r.u === uid && postsMap[r.p] && !postsMap[r.p].archived)
+    .sort((a, b) => b.at - a.at).map((r) => postsMap[r.p]), [reposts, postsMap]);
+
   const feed = useMemo(() => {
-    const vis = visiblePosts.filter((p) => !hidden[p.id] && !mutes[p.author]);
+    const vis = visiblePosts.filter((p) => !hidden[p.id] && !mutes[p.author]).map(withRepost);
     if (feedMode === 'foryou') return { main: ownFirst(vis, rankList), rest: [] };
-    const mine = (p) => p.author === me.id || following.has(p.author);
-    return { main: vis.filter(mine), rest: rankList(vis.filter((p) => !mine(p)), true) };
-  }, [visiblePosts, hidden, mutes, feedMode, following, me.id, rankList]);
+    const mine = (p) => p.author === me.id || following.has(p.author) || !!p.repostBy;
+    const when = (p) => Math.max(p.at, p.repostAt || 0);
+    return { main: vis.filter(mine).sort((a, b) => when(b) - when(a)), rest: rankList(vis.filter((p) => !mine(p)), true) };
+  }, [visiblePosts, hidden, mutes, feedMode, following, me.id, rankList, withRepost]);
 
   const reelsFor = useCallback((mode) => {
-    const vids = visiblePosts.filter((p) => isVideo(p) && !hidden[p.id] && !mutes[p.author]);
-    if (mode === 'following') return vids.filter((p) => following.has(p.author) || p.author === me.id);
+    const vids = visiblePosts.filter((p) => isVideo(p) && !hidden[p.id] && !mutes[p.author]).map(withRepost);
+    if (mode === 'following') {
+      const when = (p) => Math.max(p.at, p.repostAt || 0);
+      return vids.filter((p) => following.has(p.author) || p.author === me.id || p.repostBy).sort((a, b) => when(b) - when(a));
+    }
     return ownFirst(vids, rankList);
-  }, [visiblePosts, hidden, mutes, following, me.id, rankList]);
+  }, [visiblePosts, hidden, mutes, following, me.id, rankList, withRepost]);
 
   const isSeen = useCallback((s) => !!(seenLocal[s.id] || (s.views && s.views[me.id]) || s.author === me.id && seenLocal[s.id]), [seenLocal, me.id]);
   const storyGroups = useMemo(() => {
@@ -1131,6 +1173,29 @@ function App() {
     return true;
   };
   const birthYearDone = () => boot(true);
+  const setRepost = async (post, v) => {
+    if (!post || post.author === me.id) return false;
+    const k = me.id + ':' + post.id;
+    const had = !!reposts[k];
+    if (had === !!v) return true;
+    const row = { u: me.id, p: post.id, at: Date.now() };
+    repostsRef.current = v ? { ...repostsRef.current, [k]: row } : omit(repostsRef.current, k);
+    setReposts((m) => (v ? { ...m, [k]: row } : omit(m, k)));
+    patchPost(post.id, (p) => ({ ...p, reposts: Math.max(0, (p.reposts || 0) + (v ? 1 : -1)) }));
+    haptic(10);
+    const q = v ? sb.from('reposts').insert({ user_id: me.id, post_id: post.id }) : sb.from('reposts').delete().eq('user_id', me.id).eq('post_id', post.id);
+    const ok = await run(q, v ? 'Yeniden paylaşılamadı.' : 'Geri alınamadı.');
+    if (!ok) {
+      repostsRef.current = v ? omit(repostsRef.current, k) : { ...repostsRef.current, [k]: row };
+      setReposts((m) => (v ? omit(m, k) : { ...m, [k]: row }));
+      patchPost(post.id, (p) => ({ ...p, reposts: Math.max(0, (p.reposts || 0) + (v ? -1 : 1)) }));
+      return false;
+    }
+    if (v) toast('Yeniden paylaşıldı', { label: 'Geri al', fn: () => setRepostRef.current(post, false) });
+    else toast('Yeniden paylaşım geri alındı');
+    return true;
+  };
+  const setRepostRef = useRef(setRepost); setRepostRef.current = setRepost;
 
   /* şipşak */
   const snapTimer = useRef(null);
@@ -1272,6 +1337,7 @@ function App() {
   /* ------------------------------------------------ eksik veriyi getir */
   const mergeFetched = (d) => {
     if (!d) return;
+    if (d.reposts && d.reposts.length) setReposts((m) => { const n = { ...m }; d.reposts.forEach(([u, p, at]) => { n[u + ':' + p] = { u, p, at }; }); return n; });
     if (d.posts) setPosts((m) => { const n = { ...m }; d.posts.forEach((p) => { n[p.id] = p; }); return n; });
     if (d.comments) setComments((m) => { const n = { ...m }; d.comments.forEach((c) => { n[c.id] = c; }); return n; });
   };
@@ -1281,6 +1347,7 @@ function App() {
     mergeFetched(data);
     return data && data.posts && data.posts[0] ? data.posts[0] : null;
   };
+  ensurePostRef.current = ensurePost;
   const loadUserPosts = async (uid) => {
     if (loadedUsers.current[uid]) return;
     loadedUsers.current[uid] = true;
@@ -1407,6 +1474,7 @@ function App() {
     threads, inboxThreads, requestThreads, otherOf, myMember, isRequest, isUnread, unreadThreads,
     saved, hidden, activity, notifs, unreadActivity,
     sound, setSound, feedMode, setFeedMode, theme, setTheme, retap, tab, minor, sensitivePref, setSensitivePref, covered, reveal,
+    reposts, myRepost, repostsBy, setRepost,
     e2eeState, plain, decryptMessages, sendSecret, openSecretChatWith, ensureE2ee,
     favoriteYear, setFavoriteYear, openRecap, openFavoriteYear,
     snaps, snapNew, snapAudienceCounts, sendSnap, undoSnap, openSnap, openSnapCamera, openSnapViewer,
@@ -1443,7 +1511,7 @@ function App() {
     else if (o.type === 'people') body = <PeopleScreen uid={o.uid} initial={o.tab} ids={o.ids} title={o.title} />;
     else if (o.type === 'activity') body = <ActivityScreen />;
     else if (o.type === 'requests') body = <RequestsScreen />;
-    else if (o.type === 'inbox') body = <InboxScreen />;
+    else if (o.type === 'inbox') body = <InboxScreen />;  // eski bağlantılar için; mesajlar artık alt menüde
     else if (o.type === 'newmsg') body = <NewMessageScreen group={o.group} addTo={o.addTo} />;
     else if (o.type === 'chat') body = <ChatScreen tid={o.tid} />;
     else if (o.type === 'groupinfo') body = <GroupInfoScreen tid={o.tid} />;
@@ -1471,11 +1539,12 @@ function App() {
   return (
     <Ctx.Provider value={ctx}>
       <div className="app">
-        {['home', 'explore', 'reels', 'profile'].map((t) => (visited[t] ? (
+        {['home', 'reels', 'inbox', 'explore', 'profile'].map((t) => (visited[t] ? (
           <div key={t} className="tab-view" hidden={tab !== t}>
             {t === 'home' ? <HomeScreen live={tab === 'home' && !stack.length && !storyView && !panel} />
               : t === 'explore' ? <ExploreScreen />
               : t === 'reels' ? <ReelsScreen live={tab === 'reels' && !stack.length && !storyView && !panel} />
+              : t === 'inbox' ? <div className="col pad-nav"><InboxScreen isTab /></div>
               : <ProfileScreen uid={me.id} isTab />}
           </div>
         ) : null))}
@@ -1485,9 +1554,12 @@ function App() {
             <Icon n="home" fill={tab === 'home' && !stack.length} size={27} />
             {unreadActivity && tab !== 'home' ? <span className="pip" style={{ color: 'var(--like)' }} /> : null}
           </button>
-          <button aria-label="Keşfet" onClick={() => goTab('explore')}><Icon n="search" size={27} stroke={tab === 'explore' && !stack.length ? 2.9 : 1.9} /></button>
-          <button aria-label="Oluştur" onClick={() => openCreate('post')}><span className="create"><Icon n="plus" size={22} stroke={2.6} /></span></button>
           <button aria-label="Reels" onClick={() => goTab('reels')}><Icon n="reels" size={27} stroke={tab === 'reels' && !stack.length ? 2.6 : 1.9} /></button>
+          <button aria-label="Mesajlar" className="badge-wrap" onClick={() => goTab('inbox')}>
+            <Icon n="send" size={26} stroke={tab === 'inbox' && !stack.length ? 2.6 : 1.9} />
+            {unreadThreads + snapNew ? <span className="badge nav-badge">{unreadThreads + snapNew}</span> : null}
+          </button>
+          <button aria-label="Keşfet" onClick={() => goTab('explore')}><Icon n="search" size={27} stroke={tab === 'explore' && !stack.length ? 2.9 : 1.9} /></button>
           <button aria-label="Profil" onClick={() => goTab('profile')}>
             <span className={'me-ring' + (tab === 'profile' && !stack.length ? ' on' : '')}><img className="av" src={avatarOf(me.id)} alt="" style={{ width: 26, height: 26 }} /></span>
           </button>

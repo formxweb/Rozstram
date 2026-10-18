@@ -5,6 +5,8 @@ import { Avatar, AvatarStack, Empty, FollowButton, Icon, PersonRow, RichText, Sh
 import { GridTile } from './feed.jsx';
 import { StoryMedia } from './stories.jsx';
 
+const isVideoPost = (x) => !!(x.media && x.media[0] && x.media[0].type === 'video');
+
 /* ================================================================ profil */
 export function ProfileScreen({ uid, isTab }) {
   const app = useApp();
@@ -26,7 +28,8 @@ export function ProfileScreen({ uid, isTab }) {
   const followingIds = onKeys(p && p.following).filter((x) => app.profiles[x]);
   const mutual = isMe ? [] : followers.filter((x) => app.following.has(x));
   const followsMe = !isMe && p && isOn(p.following, app.me.id);
-  const list = tab === 'grid' ? posts : tab === 'reels' ? reels : tab === 'tagged' ? tagged : savedPosts;
+  const reposted = useMemo(() => app.repostsBy(uid), [app.repostsBy, uid]);
+  const list = tab === 'grid' ? posts : tab === 'reels' ? reels : tab === 'reposts' ? reposted : tab === 'tagged' ? tagged : savedPosts;
   const ring = locked ? null : app.storyRing(uid);
   const highlights = locked ? [] : (p && p.highlights) || [];
   const similar = useMemo(() => Object.keys(app.profiles).filter((x) => x !== uid && x !== app.me.id && !app.following.has(x) && !app.requested.has(x) && !app.blocks[x]).slice(0, 10), [app.profiles, uid, app.following, app.requested, app.blocks]);
@@ -167,15 +170,16 @@ export function ProfileScreen({ uid, isTab }) {
           <div className="tabs" style={isTab ? undefined : { top: 0 }}>
             <button className={tab === 'grid' ? 'on' : ''} onClick={() => setTab('grid')} aria-label="Gönderiler"><Icon n="grid" size={22} /></button>
             <button className={tab === 'reels' ? 'on' : ''} onClick={() => setTab('reels')} aria-label="Reels"><Icon n="reels" size={22} /></button>
+            <button className={tab === 'reposts' ? 'on' : ''} onClick={() => setTab('reposts')} aria-label="Yeniden paylaşılanlar"><Icon n="repost" size={22} /></button>
             <button className={tab === 'tagged' ? 'on' : ''} onClick={() => setTab('tagged')} aria-label="Etiketlenenler"><Icon n="tag" size={22} /></button>
             {isMe ? <button className={tab === 'saved' ? 'on' : ''} onClick={() => setTab('saved')} aria-label="Kaydedilenler"><Icon n="bookmark" size={22} /></button> : null}
           </div>
           {list.length
-            ? <div className="grid" key={tab}>{list.map((x) => <GridTile key={x.id} post={x} reel={tab === 'reels'} pinned={tab === 'grid' && x.pinned} />)}</div>
+            ? <div className="grid" key={tab}>{list.map((x) => <GridTile key={x.id} post={x} reel={tab === 'reels' || (tab === 'reposts' && isVideoPost(x))} pinned={tab === 'grid' && x.pinned} />)}</div>
             : <Empty
-                icon={tab === 'saved' ? 'bookmark' : tab === 'reels' ? 'reels' : tab === 'tagged' ? 'tag' : 'camera'}
-                title={tab === 'saved' ? 'Kaydedilen yok' : tab === 'reels' ? 'Henüz Reels yok' : tab === 'tagged' ? 'Etiketlenen gönderi yok' : isMe ? 'İlk gönderini paylaş' : 'Henüz gönderi yok'}
-                text={tab === 'saved' ? 'Beğendiğin gönderileri yer imi simgesiyle kaydet. Bunu sadece sen görürsün.' : tab === 'tagged' ? (isMe ? 'Biri seni bir gönderide etiketlediğinde burada görünür.' : '@' + p.username + ' etiketlendiğinde burada görünür.') : null}
+                icon={tab === 'saved' ? 'bookmark' : tab === 'reels' ? 'reels' : tab === 'reposts' ? 'repost' : tab === 'tagged' ? 'tag' : 'camera'}
+                title={tab === 'saved' ? 'Kaydedilen yok' : tab === 'reels' ? 'Henüz Reels yok' : tab === 'reposts' ? 'Yeniden paylaşım yok' : tab === 'tagged' ? 'Etiketlenen gönderi yok' : isMe ? 'İlk gönderini paylaş' : 'Henüz gönderi yok'}
+                text={tab === 'saved' ? 'Beğendiğin gönderileri yer imi simgesiyle kaydet. Bunu sadece sen görürsün.' : tab === 'reposts' ? (isMe ? 'Beğendiğin bir Reels’i ya da gönderiyi yeniden paylaşınca takipçilerin görür ve burada durur.' : '@' + p.username + ' yeniden paylaştığında burada görünür.') : tab === 'tagged' ? (isMe ? 'Biri seni bir gönderide etiketlediğinde burada görünür.' : '@' + p.username + ' etiketlendiğinde burada görünür.') : null}
                 action={isMe && tab === 'grid' ? <button className="btn grad" onClick={() => app.openCreate('post')}>Paylaşım yap</button> : null} />}
         </Fragment>
       )}

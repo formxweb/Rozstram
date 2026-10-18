@@ -12,7 +12,7 @@ const STORE = process.env.STORE || '/var/tmp/rozstore';
 const PORT = Number(process.env.PORT || 8787);
 const pool = new Pool({ socket: '/var/tmp/rozpg/.s.PGSQL.5433', user: 'postgres', database: process.env.DB || 'roz' }, 8);
 const RT_TABLES = ['profiles', 'follows', 'posts', 'post_likes', 'comments', 'comment_likes', 'stories', 'story_views', 'story_likes',
-  'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients'];
+  'threads', 'thread_members', 'messages', 'message_reactions', 'notifications', 'snap_recipients', 'reposts'];
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 let COLS = {}, PKS = {}, FNS = {};
 const log = (...a) => { if (process.env.VERBOSE) console.log(...a); };

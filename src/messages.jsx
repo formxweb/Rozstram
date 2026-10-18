@@ -37,7 +37,7 @@ function ThreadAvatar({ t, size }) {
 }
 
 /* ================================================================ gelen kutusu */
-export function InboxScreen() {
+export function InboxScreen({ isTab }) {
   const app = useApp();
   const [q, setQ] = useState('');
   const [tab, setTab] = useState('main');
@@ -56,7 +56,7 @@ export function InboxScreen() {
   const mine = app.myProfile || {};
   return (
     <Fragment>
-      <TopBar back title={mine.username || 'Mesajlar'}
+      <TopBar back={!isTab} title={mine.username || 'Mesajlar'}
         right={<button className="icon-btn" aria-label="Yeni mesaj" onClick={() => app.push({ type: 'newmsg' })}><Icon n="newmsg" /></button>} />
       <div className="body g">
         <label className="search" style={{ marginBlock: '4px 4px' }}><Icon n="search" size={17} /><input id="inbox-q" type="search" placeholder="Ara" value={q} onChange={(e) => setQ(e.target.value)} /></label>
