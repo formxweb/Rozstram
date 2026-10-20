@@ -338,6 +338,14 @@ create table if not exists public.reposts (
 create index if not exists reposts_post_idx on public.reposts (post_id);
 create index if not exists reposts_user_idx on public.reposts (user_id, created_at desc);
 
+-- 18 yaş altı hesapların sohbette nereye kadar okuduğu (okundu bilgisi başkalarına gösterilmez; sadece sahibi görür)
+create table if not exists public.read_marks (
+  user_id   uuid not null references public.profiles (id) on delete cascade,
+  thread_id uuid not null references public.threads (id) on delete cascade,
+  at        timestamptz not null,
+  primary key (user_id, thread_id)
+);
+
 -- =====================================================================
 -- 2) YARDIMCI FONKSİYONLAR
 -- =====================================================================
@@ -387,6 +395,21 @@ $$;
 create or replace function public.am_minor() returns boolean
 language sql stable security definer set search_path = public as $$ select public.is_minor(auth.uid()) $$;
 
+-- API'ye açık olmayan yardımcılar: sadece erişim kuralları ve sunucu fonksiyonları kullanır, uygulama doğrudan çağıramaz
+-- (böylece kimse başka bir hesabın yaşını sorgulayamaz)
+create schema if not exists private;
+grant usage on schema private to authenticated;
+
+create or replace function private.teen(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$ select public.is_minor(uid) $$;
+
+-- 15 yaşını doldurmamış olabilir mi? (7578 sayılı Kanun: 15 yaş altına sosyal ağ hizmeti verilemez)
+-- Sadece doğum yılı bilindiği için ihtiyatlı davranılır: bu yıl 15'ine basan doğum yılı da, doğum günü gelmemiş olabileceğinden kapsam dışı.
+create or replace function private.underage(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select birth_year > extract(year from now())::int - 16 from public.accounts where user_id = uid), false);
+$$;
+
 -- giriş yapan kişi hassas içeriği hiç görmemeli mi? (18 yaş altı ya da tercihi "gizle")
 create or replace function public.hide_sensitive() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -400,13 +423,19 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.user_bans b where b.user_id = uid and b.active and (b.until is null or b.until > now()));
 $$;
 
--- Banlı hesabın profili ve içeriği herkesten gizlenir (kendisi ve yöneticiler hariç)
+-- Banlı ya da 15 yaşını doldurmamış hesabın profili ve içeriği herkesten gizlenir (kendisi ve yöneticiler hariç)
 create or replace function public.ban_hidden(uid uuid) returns boolean
 language plpgsql stable security definer set search_path = public as $$
 begin
-  if uid is null or uid = auth.uid() or not public.user_banned(uid) then return false; end if;
+  if uid is null or uid = auth.uid() or not (public.user_banned(uid) or private.underage(uid)) then return false; end if;
   return not exists (select 1 from public.app_admins a where a.user_id = auth.uid());
 end $$;
+
+-- Erişim kuralları bunları kullanır; public sürümleri API'den çağrılamaz (bir hesabın banlı mı 15 yaş altı mı olduğu ayırt edilemesin)
+create or replace function private.hidden(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$ select public.ban_hidden(uid) $$;
+create or replace function private.banned(uid uuid) returns boolean
+language sql stable security definer set search_path = public as $$ select public.user_banned(uid) $$;
 
 -- Giriş yapan kullanıcı bu kişinin içeriğini görebilir mi?
 create or replace function public.can_view(owner uuid) returns boolean
@@ -460,7 +489,7 @@ create or replace function public.dm_blocked(tid uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from public.threads t join public.thread_members m on m.thread_id = t.id
-    where t.id = tid and not t.is_group and m.user_id <> auth.uid() and (public.blocked_between(m.user_id, auth.uid()) or public.user_banned(m.user_id))
+    where t.id = tid and not t.is_group and m.user_id <> auth.uid() and (public.blocked_between(m.user_id, auth.uid()) or public.user_banned(m.user_id) or private.underage(m.user_id))
   );
 $$;
 
@@ -503,7 +532,7 @@ begin
   if not public.username_valid(u) then raise exception 'username_invalid'; end if;
   if em is null and ph is null then raise exception 'contact_required'; end if;
   if byr is not null and (byr < cy - 120 or byr > cy) then raise exception 'birth_year_invalid'; end if;
-  if byr is not null and byr > cy - 13 then raise exception 'too_young'; end if;
+  if byr is not null and byr > cy - 16 then raise exception 'too_young'; end if;  -- 15 yaşını doldurmuş olmalı (bkz. private.underage)
   insert into public.usernames (name, user_id) values (u, new.id);
   insert into public.profiles (id, username, full_name, is_private)
   values (new.id, u, left(btrim(coalesce(m ->> 'full_name', '')), 60), coalesce(byr > cy - 18, false));
@@ -864,11 +893,12 @@ end $$;
 create or replace trigger messages_after after insert or update on public.messages
   for each row execute function public.messages_after();
 
--- Banlı hesap paylaşamaz, beğenemez, yorum/mesaj yazamaz, takip edemez, profilini değiştiremez
+-- Banlı ya da 15 yaşını doldurmamış hesap paylaşamaz, beğenemez, yorum/mesaj yazamaz, takip edemez, profilini değiştiremez
 create or replace function public.ban_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is not null and public.user_banned(auth.uid()) then raise exception 'banned'; end if;
+  if auth.uid() is not null and private.underage(auth.uid()) then raise exception 'too_young'; end if;
   return new;
 end $$;
 
@@ -880,6 +910,52 @@ begin
     execute format('create or replace trigger aa_ban_guard before insert or update on public.%I for each row execute function public.ban_guard()', t);
   end loop;
 end $$;
+
+-- 15–18 yaş: hesap herkese açık yapılamaz
+create or replace function public.profiles_teen() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.is_private is distinct from true and private.teen(new.id) then new.is_private := true; end if;
+  return new;
+end $$;
+create or replace trigger profiles_teen before update on public.profiles
+  for each row execute function public.profiles_teen();
+
+-- 15–18 yaş: okundu bilgisi gösterilmez. Gencin okuma konumu sohbet üyelerine görünen satıra değil, sadece kendisine açık tabloya yazılır.
+create or replace function public.thread_members_teen() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.last_read_at is distinct from old.last_read_at and private.teen(new.user_id) then
+    insert into public.read_marks (user_id, thread_id, at) values (new.user_id, new.thread_id, new.last_read_at)
+    on conflict (user_id, thread_id) do update set at = greatest(public.read_marks.at, excluded.at);
+    new.last_read_at := old.last_read_at;
+  end if;
+  return new;
+end $$;
+create or replace trigger thread_members_teen before update on public.thread_members
+  for each row execute function public.thread_members_teen();
+
+-- Takip önerileri: 18 yaş altı hesaplar kimseye önerilmez, onlara da öneri gösterilmez
+create or replace function private.suggestions(me uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(id order by score desc), '[]'::jsonb) from (
+    select p.id,
+      3 * (select count(*) from public.follows a join public.follows b on b.follower = a.following
+           where a.follower = me and a.status = 'accepted' and b.following = p.id and b.status = 'accepted')
+      + case when exists (select 1 from public.follows f where f.follower = p.id and f.following = me and f.status = 'accepted') then 5 else 0 end
+      + case when p.avatar is not null then 1 else 0 end
+      + extract(epoch from p.created_at) / 1e10 as score
+    from public.profiles p
+    where me is not null and not private.teen(me)
+      and p.id <> me
+      and not private.teen(p.id)
+      and not exists (select 1 from public.follows f where f.follower = me and f.following = p.id)
+      and not public.blocked_between(me, p.id)
+      and not public.ban_hidden(p.id)
+    order by score desc
+    limit 30
+  ) q;
+$$;
 
 -- =====================================================================
 -- 5) MESAJLAŞMA FONKSİYONLARI
@@ -1287,14 +1363,19 @@ end $$;
 -- 5d) YAŞ, HASSAS İÇERİK, ŞİPŞAK, ŞİFRELİ SOHBET, YIL ÖZETİ
 -- =====================================================================
 
--- Doğum yılı bir kez girilir (sonradan değiştirilemez). 13 yaş altı kullanamaz; 18 altı gizli hesap + hassas içerik kapalı.
+-- Doğum yılı bir kez girilir (sonradan değiştirilemez). 15 yaşını doldurmamış kullanamaz (yıl kaydedilir, hesap kapanır);
+-- 18 altı: gizli hesap, hassas içerik kapalı, takip listeleri gizli, okundu bilgisi yok, önerilerde çıkmaz.
 create or replace function public.set_birth_year(y int) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare cy int := extract(year from now())::int;
 begin
   if auth.uid() is null then raise exception 'not_authenticated'; end if;
   if y is null or y < cy - 120 or y > cy then raise exception 'birth_year_invalid'; end if;
-  if y > cy - 13 then raise exception 'too_young'; end if;
+  if y > cy - 16 then
+    update public.accounts set birth_year = y where user_id = auth.uid() and birth_year is null;
+    if not found then raise exception 'birth_year_set'; end if;
+    return jsonb_build_object('birthYear', y, 'minor', true, 'underage', true);
+  end if;
   update public.accounts set birth_year = y,
     prefs = case when y > cy - 18 then prefs || '{"sensitive":"hide"}'::jsonb else prefs end
   where user_id = auth.uid() and birth_year is null;
@@ -1345,7 +1426,7 @@ begin
     and case when p_audience = 'close'
           then exists (select 1 from public.close_friends c where c.owner = me and c.friend = f.follower)
           else exists (select 1 from public.follows g where g.follower = me and g.following = f.follower and g.status = 'accepted') end
-    and not public.blocked_between(me, f.follower) and not public.user_banned(f.follower);
+    and not public.blocked_between(me, f.follower) and not public.user_banned(f.follower) and not private.underage(f.follower);
   get diagnostics n = row_count;
   if n = 0 then raise exception 'no_recipients'; end if;
   return jsonb_build_object('id', sid, 'count', n);
@@ -1491,7 +1572,7 @@ language sql stable as $$
     'avatar', p.avatar, 'private', p.is_private, 'verified', p.verified, 'showActivity', p.show_activity, 'highlights', p.highlights,
     'note', case when p.note_at > now() - interval '24 hours' then p.note else null end, 'noteAt', case when p.note_at is null then null else public.ms(p.note_at) end,
     'lastSeen', case when p.show_activity and p.last_seen is not null then public.ms(p.last_seen) else null end, 'at', public.ms(p.created_at),
-    'banned', case when public.is_admin() then public.user_banned(p.id) else false end
+    'banned', case when public.is_admin() then private.banned(p.id) else false end
   );
 $$;
 
@@ -1499,7 +1580,12 @@ create or replace function public.thread_json(t public.threads) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
     'id', t.id, 'isGroup', t.is_group, 'title', t.title, 'createdBy', t.created_by, 'at', public.ms(t.last_at), 'last', t.last, 'e2ee', t.e2ee,
-    'members', coalesce((select jsonb_agg(jsonb_build_object('id', m.user_id, 'read', public.ms(m.last_read_at), 'accepted', m.accepted, 'muted', m.muted) order by m.joined_at)
+    'members', coalesce((select jsonb_agg(jsonb_build_object('id', m.user_id,
+                           'read', case when m.user_id = auth.uid()
+                                          then public.ms(greatest(m.last_read_at, coalesce((select r.at from public.read_marks r where r.user_id = m.user_id and r.thread_id = t.id), m.last_read_at)))
+                                        when private.teen(m.user_id) then null
+                                        else public.ms(m.last_read_at) end,
+                           'accepted', m.accepted, 'muted', m.muted) order by m.joined_at)
                          from public.thread_members m where m.thread_id = t.id), '[]'::jsonb)
   );
 $$;
@@ -1549,6 +1635,8 @@ language sql stable set search_path = public as $$
     'viewed', public.my_views(),
     'isAdmin', public.is_admin(),
     'ban', public.my_ban(),
+    'underage', private.underage(auth.uid()),
+    'suggest', private.suggestions(auth.uid()),
     'snaps', public.my_snaps(),
     'favoriteYear', public.favorite_year_info() -> 'mine',
     'settings', coalesce((select jsonb_object_agg(s.key, s.value) from public.app_settings s), '{}'::jsonb),
@@ -1649,6 +1737,11 @@ alter table public.snap_recipients   enable row level security;
 alter table public.device_keys       enable row level security;
 alter table public.favorite_years    enable row level security;
 alter table public.reposts           enable row level security;
+alter table public.read_marks        enable row level security;
+
+-- gençlerin okuma konumu: sadece kendisi görür
+drop policy if exists read_marks_select on public.read_marks;
+create policy read_marks_select on public.read_marks for select to authenticated using (user_id = auth.uid());
 
 -- yeniden paylaşımlar: gönderiyi ve paylaşanı görebiliyorsan görürsün
 drop policy if exists reposts_select on public.reposts;
@@ -1685,7 +1778,7 @@ create policy app_settings_select on public.app_settings for select to authentic
 
 -- profiller: herkes görür (seni engelleyenler hariç), sadece kendin düzenlersin
 drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles for select to authenticated using (not public.blocked_me(id) and not public.ban_hidden(id));
+create policy profiles_select on public.profiles for select to authenticated using (not public.blocked_me(id) and not private.hidden(id));
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
@@ -1704,12 +1797,13 @@ create policy blocks_delete on public.blocks for delete to authenticated using (
 drop policy if exists follows_select on public.follows;
 create policy follows_select on public.follows for select to authenticated using (
   (follower = auth.uid() or following = auth.uid()
-   or (status = 'accepted' and (public.can_view(follower) or public.can_view(following))))
+   or (status = 'accepted' and (public.can_view(follower) or public.can_view(following))
+       and not private.teen(follower) and not private.teen(following)))
   and not public.blocked_between(follower, following)
-  and not public.ban_hidden(follower) and not public.ban_hidden(following)
+  and not private.hidden(follower) and not private.hidden(following)
 );
 drop policy if exists follows_insert on public.follows;
-create policy follows_insert on public.follows for insert to authenticated with check (follower = auth.uid() and not public.ban_hidden(following));
+create policy follows_insert on public.follows for insert to authenticated with check (follower = auth.uid() and not private.hidden(following));
 drop policy if exists follows_update on public.follows;
 create policy follows_update on public.follows for update to authenticated using (following = auth.uid()) with check (following = auth.uid());
 drop policy if exists follows_delete on public.follows;
@@ -1738,7 +1832,7 @@ drop policy if exists posts_delete on public.posts;
 create policy posts_delete on public.posts for delete to authenticated using (author = auth.uid());
 
 drop policy if exists post_likes_select on public.post_likes;
-create policy post_likes_select on public.post_likes for select to authenticated using (exists (select 1 from public.posts p where p.id = post_id) and not public.ban_hidden(user_id));
+create policy post_likes_select on public.post_likes for select to authenticated using (exists (select 1 from public.posts p where p.id = post_id) and not private.hidden(user_id));
 drop policy if exists post_likes_insert on public.post_likes;
 create policy post_likes_insert on public.post_likes for insert to authenticated with check (user_id = auth.uid() and exists (select 1 from public.posts p where p.id = post_id));
 drop policy if exists post_likes_delete on public.post_likes;
@@ -1747,7 +1841,7 @@ create policy post_likes_delete on public.post_likes for delete to authenticated
 -- yorumlar
 drop policy if exists comments_select on public.comments;
 create policy comments_select on public.comments for select to authenticated using (
-  exists (select 1 from public.posts p where p.id = post_id) and not public.blocked_between(author, auth.uid()) and not public.ban_hidden(author)
+  exists (select 1 from public.posts p where p.id = post_id) and not public.blocked_between(author, auth.uid()) and not private.hidden(author)
 );
 drop policy if exists comments_insert on public.comments;
 create policy comments_insert on public.comments for insert to authenticated with check (
@@ -1759,7 +1853,7 @@ create policy comments_delete on public.comments for delete to authenticated usi
 );
 
 drop policy if exists comment_likes_select on public.comment_likes;
-create policy comment_likes_select on public.comment_likes for select to authenticated using (exists (select 1 from public.comments c where c.id = comment_id) and not public.ban_hidden(user_id));
+create policy comment_likes_select on public.comment_likes for select to authenticated using (exists (select 1 from public.comments c where c.id = comment_id) and not private.hidden(user_id));
 drop policy if exists comment_likes_insert on public.comment_likes;
 create policy comment_likes_insert on public.comment_likes for insert to authenticated with check (user_id = auth.uid() and exists (select 1 from public.comments c where c.id = comment_id));
 drop policy if exists comment_likes_delete on public.comment_likes;
@@ -1826,7 +1920,7 @@ create policy reactions_delete on public.message_reactions for delete to authent
 -- bildirimler
 drop policy if exists notifications_select on public.notifications;
 create policy notifications_select on public.notifications for select to authenticated using (
-  user_id = auth.uid() and not public.blocked_between(user_id, actor) and not public.ban_hidden(actor)
+  user_id = auth.uid() and not public.blocked_between(user_id, actor) and not private.hidden(actor)
   and public.notif_live(kind, actor, user_id, post_id, comment_id, story_id)
 );
 drop policy if exists notifications_update on public.notifications;
@@ -1873,6 +1967,7 @@ revoke insert, update, delete on public.snap_recipients from authenticated;
 revoke update on public.device_keys from authenticated;
 revoke all on public.favorite_years from authenticated;
 revoke update on public.reposts from authenticated;
+revoke insert, update, delete on public.read_marks from authenticated;
 
 -- fonksiyonlar: varsayılan olarak kimse çağıramaz, sonra tek tek açılır
 revoke execute on all functions in schema public from public, anon, authenticated;
@@ -1889,7 +1984,7 @@ grant execute on function
   public.admin_resolve_report(bigint), public.admin_remove_post(uuid, text), public.admin_restore_post(uuid),
   public.admin_boost_post(uuid, numeric, int), public.admin_set_rank(jsonb), public.admin_set_verified(uuid, boolean),
   public.admin_add_track(text, text, text, text, numeric), public.admin_set_track_active(uuid, boolean),
-  public.user_banned(uuid), public.ban_hidden(uuid), public.my_ban(), public.ban_appeal(text),
+  public.my_ban(), public.ban_appeal(text),
   public.am_minor(), public.hide_sensitive(), public.set_birth_year(int), public.set_prefs(jsonb), public.admin_set_sensitive(uuid, boolean),
   public.snap_sender(uuid), public.send_snap(jsonb, text, text), public.open_snap(uuid, text), public.my_snaps(),
   public.start_secret_dm(uuid), public.year_recap(int), public.favorite_year_info(), public.set_favorite_year(int, text),
@@ -1900,6 +1995,9 @@ grant execute on function
   public.get_messages(uuid, bigint, int)
   to authenticated;
 grant execute on function public.signup_check(text, text, text), public.signup_rate_ok(text) to service_role;
+-- özel şemadaki yardımcılar: kurallar ve sunucu fonksiyonları içinden çalışır, API'den çağrılamaz
+revoke execute on all functions in schema private from public, anon;
+grant execute on all functions in schema private to authenticated;
 
 -- ayrılmış kullanıcı adları (kimse alamaz)
 insert into public.usernames (name, reserved)
@@ -1937,7 +2035,7 @@ on conflict (id) do update set public = true, file_size_limit = excluded.file_si
 
 drop policy if exists media_insert on storage.objects;
 create policy media_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text and not public.user_banned(auth.uid()));
+  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text and not private.banned(auth.uid()));
 drop policy if exists media_update on storage.objects;
 create policy media_update on storage.objects for update to authenticated
   using (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);

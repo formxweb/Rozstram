@@ -143,7 +143,7 @@ async function handleSignup(b, ip) {
   if (password.length < 8) return json(400, { error: 'password_short' });
   if (password.length > 72) return json(400, { error: 'password_long' });
   if (birthYear !== null && (!Number.isInteger(birthYear) || birthYear < thisYear - 120 || birthYear > thisYear)) return json(400, { error: 'birth_year_invalid' });
-  if (birthYear !== null && thisYear - birthYear < 13) return json(400, { error: 'too_young' });
+  if (birthYear !== null && birthYear > thisYear - 16) return json(400, { error: 'too_young' });
   if (!(await pool.one('select public.signup_rate_ok(' + lit(ip) + ')', 'service_role'))) return json(429, { error: 'rate_limited' });
   const chk = await pool.one(`select public.signup_check(${lit(username)}, ${lit(email)}, ${lit(phone)})`, 'service_role');
   if (chk !== 'ok') return json(409, { error: chk });

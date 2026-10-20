@@ -129,7 +129,7 @@ const ERRORS = {
   banned: 'Hesabın askıya alındı.',
   appeal_sent: 'İtirazın zaten gönderildi.',
   not_found: 'Bulunamadı; hesap ya da içerik artık yok.',
-  too_young: 'Rozstram’ı kullanmak için en az 13 yaşında olmalısın.',
+  too_young: 'Rozstram’ı kullanmak için 15 yaşını doldurmuş olmalısın.',
   birth_year_invalid: 'Geçerli bir doğum yılı seç.',
   birth_year_set: 'Doğum yılın zaten kayıtlı.',
   teen_locked: '18 yaşından küçükler için hassas içerik kapalı kalır.',

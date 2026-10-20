@@ -329,7 +329,7 @@ select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000
 select t.as_user('00000000-0000-0000-0000-00000000000b');
 select t.err($q$select public.admin_ban_user('00000000-0000-0000-0000-00000000000b', 'x', 1)$q$, 'not_allowed', 'yönetici kendini banlayamaz');
 select t.ok((public.admin_ban_user('00000000-0000-0000-0000-00000000000d', '  Spam  ', null) ->> 'reason') = 'Spam', 'yönetici daveyi kalıcı banladı');
-select t.ok(public.user_banned('00000000-0000-0000-0000-00000000000d'), 'dave banlı');
+select t.ok(private.banned('00000000-0000-0000-0000-00000000000d'), 'dave banlı');
 select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 1, 'yönetici banlı profili görür');
 select t.ok((select (public.profile_json(p) ->> 'banned')::boolean from public.profiles p where id = '00000000-0000-0000-0000-00000000000d'), 'yönetici profilde ban işaretini görür');
 select t.ok((public.admin_users('dave') -> 'users' -> 0 -> 'ban' ->> 'reason') = 'Spam', 'yönetici aramasında ban bilgisi');
@@ -361,7 +361,7 @@ select t.as_user('00000000-0000-0000-0000-00000000000d');
 select t.ok((public.my_ban() ->> 'appealRejected')::boolean, 'kişi itirazının reddedildiğini görür');
 select t.as_user('00000000-0000-0000-0000-00000000000b');
 select public.admin_unban_user('00000000-0000-0000-0000-00000000000d');
-select t.ok(not public.user_banned('00000000-0000-0000-0000-00000000000d'), 'ban kaldırıldı');
+select t.ok(not private.banned('00000000-0000-0000-0000-00000000000d'), 'ban kaldırıldı');
 select t.as_user('00000000-0000-0000-0000-00000000000c');
 select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-00000000000d') = 1, 'ban kalkınca profil yine görünür');
 select t.as_user('00000000-0000-0000-0000-00000000000d');
@@ -376,33 +376,54 @@ reset role;
 update public.user_bans set until = now() - interval '1 minute' where user_id = '00000000-0000-0000-0000-00000000000d';
 set role authenticated;
 select t.as_user('00000000-0000-0000-0000-00000000000d');
-select t.ok(public.my_ban() is null and not public.user_banned(auth.uid()), 'süresi dolan ban kendiliğinden biter');
+select t.ok(public.my_ban() is null and not private.banned(auth.uid()), 'süresi dolan ban kendiliğinden biter');
 select t.as_user('00000000-0000-0000-0000-00000000000a');
 
 -- ------------------------------------------------------------------ yaş, hassas içerik, şipşak, şifreli sohbet, yıl özeti
 \echo '== yaş ve genç hesap'
 reset role;
-select t.err($q$insert into auth.users (email, raw_user_meta_data) values ('k1@h.app', jsonb_build_object('username', 'kucuk', 'contact_email', 'k@k.com', 'birth_year', extract(year from now())::int - 10))$q$, 'too_young', '13 yaş altı kayıt olamaz');
+select t.err($q$insert into auth.users (email, raw_user_meta_data) values ('k1@h.app', jsonb_build_object('username', 'kucuk', 'contact_email', 'k@k.com', 'birth_year', extract(year from now())::int - 10))$q$, 'too_young', '15 yaş altı kayıt olamaz');
+select t.err($q$insert into auth.users (email, raw_user_meta_data) values ('k2@h.app', jsonb_build_object('username', 'kucuk2', 'contact_email', 'k2@k.com', 'birth_year', extract(year from now())::int - 15))$q$, 'too_young', 'bu yıl 15 olacak olan da (yıl hesabıyla) kayıt olamaz');
 insert into auth.users (id, email, raw_user_meta_data) values
-  ('00000000-0000-0000-0000-0000000000e1', 'ue1@h.app', jsonb_build_object('username', 'genc', 'full_name', 'Genç', 'contact_email', 'genc@mail.com', 'birth_year', extract(year from now())::int - 15)),
+  ('00000000-0000-0000-0000-0000000000e1', 'ue1@h.app', jsonb_build_object('username', 'genc', 'full_name', 'Genç', 'contact_email', 'genc@mail.com', 'birth_year', extract(year from now())::int - 16)),
   ('00000000-0000-0000-0000-0000000000e2', 'ue2@h.app', '{"username":"eren","full_name":"Eren","contact_email":"eren@mail.com"}'),
-  ('00000000-0000-0000-0000-0000000000e3', 'ue3@h.app', jsonb_build_object('username', 'fatma', 'full_name', 'Fatma', 'contact_email', 'fatma@mail.com', 'birth_year', 1990));
+  ('00000000-0000-0000-0000-0000000000e3', 'ue3@h.app', jsonb_build_object('username', 'fatma', 'full_name', 'Fatma', 'contact_email', 'fatma@mail.com', 'birth_year', 1990)),
+  ('00000000-0000-0000-0000-0000000000e4', 'ue4@h.app', '{"username":"minik","full_name":"Minik","contact_email":"minik@mail.com"}');
 set role authenticated;
 select t.as_user('00000000-0000-0000-0000-0000000000e1');
 select t.ok(public.am_minor(), 'genç hesap 18 yaş altı');
 select t.err($q$select public.is_minor('00000000-0000-0000-0000-0000000000e2')$q$, 'permission denied', 'başkasının yaşı sorgulanamaz');
+select t.err($q$select public.ban_hidden('00000000-0000-0000-0000-0000000000e2')$q$, 'permission denied', 'gizli hesap kontrolü doğrudan çağrılamaz');
+select t.err($q$select public.user_banned('00000000-0000-0000-0000-0000000000e2')$q$, 'permission denied', 'başkasının ban durumu sorgulanamaz');
 select t.ok((select is_private from public.profiles where id = auth.uid()), 'genç hesap gizli başlar');
 select t.ok((public.bootstrap() -> 'account' -> 'prefs' ->> 'sensitive') = 'hide', 'gençte hassas içerik kapalı başlar');
 select t.err($q$select public.set_prefs('{"sensitive":"show"}')$q$, 'teen_locked', 'genç hassas içeriği açamaz');
 select t.err($q$select public.set_birth_year(1990)$q$, 'birth_year_set', 'doğum yılı sonradan değiştirilemez');
 select t.as_user('00000000-0000-0000-0000-0000000000e2');
 select t.ok((public.bootstrap() -> 'account' ->> 'birthYear') is null, 'eski hesapta doğum yılı yok');
-select t.err($q$select public.set_birth_year(extract(year from now())::int - 8)$q$, 'too_young', '13 yaş altı doğum yılı kabul edilmez');
 select t.ok((public.set_birth_year(1995) ->> 'minor')::boolean = false, 'yetişkin doğum yılını ekledi');
 select t.ok(not public.am_minor(), 'eren yetişkin');
 select t.err($q$select public.set_prefs('{"sensitive":"acik"}')$q$, 'bad_value', 'geçersiz tercih');
 select t.ok((public.set_prefs('{"sensitive":"show"}') ->> 'sensitive') = 'show', 'yetişkin hassas içeriği açtı');
 select t.ok((select count(*) from public.accounts where user_id <> auth.uid()) = 0, 'başkasının doğum yılı görünmez');
+select t.ok(not (public.bootstrap() ->> 'underage')::boolean, 'yetişkin 15 yaş altı sayılmaz');
+
+\echo '== 15 yaş altı eski hesap'
+select t.as_user('00000000-0000-0000-0000-0000000000e4');
+insert into public.posts (id, media, caption) values ('10000000-0000-0000-0000-0000000000e4', '[{"id":"e4/p/1.jpg","type":"image"}]', 'eski gönderi');
+select t.ok((public.set_birth_year(extract(year from now())::int - 12) ->> 'underage')::boolean, '15 yaş altı doğum yılı kaydedilir ve hesap kapanır');
+select t.ok((public.bootstrap() ->> 'underage')::boolean, 'bootstrap hesabın 15 yaş altı olduğunu söyler');
+select t.err($q$select public.set_birth_year(1990)$q$, 'birth_year_set', '15 yaş altı doğum yılı sonradan büyütülemez');
+select t.err($q$insert into public.posts (media, caption) values ('[{"id":"e4/p/2.jpg","type":"image"}]', 'yeni')$q$, 'too_young', '15 yaş altı hesap paylaşım yapamaz');
+select t.err($q$update public.profiles set bio = 'merhaba' where id = auth.uid()$q$, 'too_young', '15 yaş altı hesap profilini değiştiremez');
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select t.ok((select count(*) from public.profiles where id = '00000000-0000-0000-0000-0000000000e4') = 0, '15 yaş altı hesap başkalarına görünmez');
+select t.ok((select count(*) from public.posts where id = '10000000-0000-0000-0000-0000000000e4') = 0, '15 yaş altı hesabın gönderileri görünmez');
+reset role;
+set role anon;
+select t.err($q$select private.underage('00000000-0000-0000-0000-0000000000e4')$q$, 'permission denied', 'anonim kullanıcı özel şemadaki yardımcıları çağıramaz');
+reset role;
+set role authenticated;
 
 \echo '== hassas içerik'
 select t.as_user('00000000-0000-0000-0000-0000000000e2');
@@ -430,7 +451,25 @@ select t.err($q$select public.start_dm('00000000-0000-0000-0000-0000000000e1')$q
 select t.as_user('00000000-0000-0000-0000-0000000000e1');
 insert into public.follows (follower, following) values (auth.uid(), '00000000-0000-0000-0000-0000000000e2');
 select t.as_user('00000000-0000-0000-0000-0000000000e2');
-select t.ok(public.start_dm('00000000-0000-0000-0000-0000000000e1') is not null, 'gencin takip ettiği kişi yazabilir');
+select public.start_dm('00000000-0000-0000-0000-0000000000e1') as teen_thread \gset
+select t.ok(:'teen_thread' is not null, 'gencin takip ettiği kişi yazabilir');
+select t.ok((select count(*) from public.follows where follower = '00000000-0000-0000-0000-0000000000e1') = 1, 'genç tarafından takip edilen kişi bu takibi görür');
+
+\echo '== 15-18 korumaları'
+select t.as_user('00000000-0000-0000-0000-0000000000e3');
+select t.ok((select count(*) from public.follows where follower = '00000000-0000-0000-0000-0000000000e1' or following = '00000000-0000-0000-0000-0000000000e1') = 0, 'gencin takip listesi üçüncü kişilere görünmez');
+select t.ok(not ((public.bootstrap() -> 'suggest') ? '00000000-0000-0000-0000-0000000000e1'), 'genç kimseye önerilmez');
+select t.ok(jsonb_array_length(public.bootstrap() -> 'suggest') > 0, 'yetişkine öneri gelir');
+select t.as_user('00000000-0000-0000-0000-0000000000e1');
+select t.ok(jsonb_array_length(public.bootstrap() -> 'suggest') = 0, 'gence takip önerisi gösterilmez');
+update public.profiles set is_private = false where id = auth.uid();
+select t.ok((select is_private from public.profiles where id = auth.uid()), 'genç hesabını herkese açık yapamaz');
+update public.thread_members set accepted = true, last_read_at = now() where thread_id = :'teen_thread' and user_id = auth.uid();
+select t.ok((select m ->> 'read' from jsonb_array_elements(public.thread_json((select t from public.threads t where id = :'teen_thread')) -> 'members') m where m ->> 'id' = auth.uid()::text)::bigint > 0, 'genç kendi okuma konumunu görür');
+select t.as_user('00000000-0000-0000-0000-0000000000e2');
+select t.ok((select m ->> 'read' from jsonb_array_elements(public.thread_json((select t from public.threads t where id = :'teen_thread')) -> 'members') m where m ->> 'id' = '00000000-0000-0000-0000-0000000000e1') is null, 'gencin okundu bilgisi karşı tarafa gitmez');
+select t.ok((select last_read_at from public.thread_members where thread_id = :'teen_thread' and user_id = '00000000-0000-0000-0000-0000000000e1') = to_timestamp(0), 'gencin okuma zamanı paylaşılan satıra yazılmaz');
+select t.ok((select count(*) from public.read_marks) = 0, 'başkasının okuma konumları görünmez');
 
 \echo '== şipşak'
 select t.as_user('00000000-0000-0000-0000-0000000000e2');

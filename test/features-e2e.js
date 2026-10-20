@@ -18,8 +18,9 @@ const openSettings = async (P) => {
     const t = Date.now().toString().slice(-5);
     const a = await apiSignup({ username: 'ayla' + t, full_name: 'Ayla', email: 'ay' + t + '@mail.com', password: 'aylaayla1' });
     const b = await apiSignup({ username: 'baris' + t, full_name: 'Barış', email: 'ba' + t + '@mail.com', password: 'barisbaris' });
-    const k = await apiSignup({ username: 'genc' + t, full_name: 'Genç', email: 'ge' + t + '@mail.com', password: 'gencgenc1', birth_year: CY - 15 });
+    const k = await apiSignup({ username: 'genc' + t, full_name: 'Genç', email: 'ge' + t + '@mail.com', password: 'gencgenc1', birth_year: CY - 16 });
     const o = await apiSignup({ username: 'eski' + t, full_name: 'Eski Üye', email: 'es' + t + '@mail.com', password: 'eskieski1', birth_year: null });
+    const u = await apiSignup({ username: 'kucuk' + t, full_name: 'Küçük', email: 'ku' + t + '@mail.com', password: 'kucukkucuk1', birth_year: null });
     const A_ = 'ayla' + t, B_ = 'baris' + t;
     await sql(`insert into public.follows (follower, following, status) values
       ('${a.user.id}', '${b.user.id}', 'accepted'), ('${b.user.id}', '${a.user.id}', 'accepted'), ('${k.user.id}', '${a.user.id}', 'accepted')`);
@@ -40,22 +41,26 @@ const openSettings = async (P) => {
     await S.waitForSelector('.auth-input.uname.good');
     await S.getByRole('button', { name: 'İleri' }).click();
     await S.selectOption('#su-birth', String(CY - 10));
-    await text(S, 'en az 13 yaşında olmalısın');
-    if (!(await S.getByRole('button', { name: 'Kaydol' }).isDisabled())) throw new Error('13 yaş altı kaydol açık');
-    ok('13 yaş altı kayıt olamıyor');
-    await S.selectOption('#su-birth', String(CY - 14));
-    await text(S, 'hesabın gizli başlar');
+    await text(S, '15 yaşını doldurmuş olmalısın');
+    if (!(await S.getByRole('button', { name: 'Kaydol' }).isDisabled())) throw new Error('15 yaş altı kaydol açık');
+    await S.selectOption('#su-birth', String(CY - 15));
+    await text(S, (CY + 1) + ' yılının başında kaydolabilirsin');
+    if (!(await S.getByRole('button', { name: 'Kaydol' }).isDisabled())) throw new Error('bu yıl 15 olan için kaydol açık');
+    await shot(S, 'kayit-15-yas-alti');
+    ok('15 yaş altı (ve bu yıl 15 olan) kayıt olamıyor');
+    await S.selectOption('#su-birth', String(CY - 16));
+    await text(S, 'takip listelerin başkalarına görünmez');
     await shot(S, 'kayit-dogum-yili');
     await S.getByRole('button', { name: 'Kaydol' }).click();
     await text(S, 'Hoş geldin, @minik' + t, 15000);
     const kid = await sql(`select p.is_private::text || ':' || a.birth_year from public.profiles p join public.accounts a on a.user_id = p.id where p.username = 'minik${t}'`);
-    if (kid !== 'true:' + (CY - 14)) throw new Error('genç hesap yanlış: ' + kid);
+    if (kid !== 'true:' + (CY - 16)) throw new Error('genç hesap yanlış: ' + kid);
     if ((await S.evaluate(() => document.documentElement.getAttribute('data-theme'))) !== 'fun') throw new Error('gençte Renkli tema yok');
     await S.getByRole('button', { name: 'Şimdilik atla' }).click();
     await S.getByRole('button', { name: 'İleri' }).click();
     await S.getByRole('button', { name: 'Rozstram’a başla' }).click();
     await shot(S, 'genc-renkli-tema');
-    ok('14 yaşında kayıt: hesap gizli, doğum yılı kayıtlı, Renkli tema açık');
+    ok('16 yaşında kayıt: hesap gizli, doğum yılı kayıtlı, Renkli tema açık');
 
     /* ------------------------------------------------ eski hesap: doğum yılı sorulur */
     const O = await newUser(browser, 'eski', o);
@@ -66,6 +71,26 @@ const openSettings = async (P) => {
     await O.locator('#birth-save').click();
     await O.waitForSelector('nav', { timeout: 10000 });
     ok('doğum yılı olmayan eski hesaba bir kez soruldu');
+
+    /* ------------------------------------------------ eski hesap 15 yaş altı çıkarsa: kapanır, silebilir */
+    const U = await newUser(browser, 'kucuk', u);
+    await U.goto(BASE + '/');
+    await text(U, 'Doğum yılını ekle');
+    await U.selectOption('#birth-year', String(CY - 12));
+    await text(U, 'hesabın kapanır');
+    await U.locator('#birth-save').click();
+    await text(U, 'Hesabın şimdilik kapalı', 10000);
+    await text(U, '1 Ocak ' + (CY - 12 + 16));
+    await shot(U, 'yas-alti-kapali');
+    const hidden = await sql(`select count(*) from public.profiles where username = 'kucuk${t}'`);
+    if (String(hidden) !== '1') throw new Error('profil satırı yok: ' + hidden);
+    ok('15 yaş altı eski hesap kapandı, açılış tarihi gösterildi');
+    await U.locator('#underage-delete').click();
+    await U.locator('#underage-delete-yes').click();
+    await U.getByRole('button', { name: 'Kaydol' }).waitFor({ timeout: 15000 });
+    const gone = await sql(`select count(*) from public.profiles where username = 'kucuk${t}'`);
+    if (String(gone) !== '0') throw new Error('15 yaş altı hesap silinemedi');
+    ok('15 yaş altı hesap kendini silebildi');
 
     /* ------------------------------------------------ hassas içerik */
     const B = await newUser(browser, 'baris', b);
@@ -85,6 +110,8 @@ const openSettings = async (P) => {
     await openSettings(K);
     if (!(await K.locator('[aria-label="Hassas içerik"] button', { hasText: 'Göster' }).isDisabled())) throw new Error('gençte hassas içerik açılabiliyor');
     await text(K, 'hassas içerik hep gizli kalır');
+    await text(K, 'hesabın gizli kalır; takipçi ve takip listelerin başkalarına görünmez');
+    if (await K.locator('#set-private').count()) throw new Error('genç gizli hesabı kapatabiliyor');
     ok('genç hassas gönderiyi hiç görmüyor, ayarı açamıyor');
 
     /* ------------------------------------------------ şipşak */

@@ -32,7 +32,7 @@ export function ProfileScreen({ uid, isTab }) {
   const list = tab === 'grid' ? posts : tab === 'reels' ? reels : tab === 'reposts' ? reposted : tab === 'tagged' ? tagged : savedPosts;
   const ring = locked ? null : app.storyRing(uid);
   const highlights = locked ? [] : (p && p.highlights) || [];
-  const similar = useMemo(() => Object.keys(app.profiles).filter((x) => x !== uid && x !== app.me.id && !app.following.has(x) && !app.requested.has(x) && !app.blocks[x]).slice(0, 10), [app.profiles, uid, app.following, app.requested, app.blocks]);
+  const similar = useMemo(() => (app.suggest || []).filter((x) => app.profiles[x] && x !== uid && x !== app.me.id && !app.following.has(x) && !app.requested.has(x) && !app.blocks[x]).slice(0, 10), [app.suggest, app.profiles, uid, app.following, app.requested, app.blocks]);
 
   const ownCreate = () => app.setSheet({
     title: 'Oluştur',

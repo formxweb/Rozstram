@@ -6,6 +6,14 @@ import { Icon, Mark, Sheet, Spinner } from './ui.jsx';
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export const THIS_YEAR = new Date().getFullYear();
 export const BIRTH_YEARS = Array.from({ length: 100 }, (_, i) => THIS_YEAR - i);
+// 7578 sayılı Kanun: 15 yaşını doldurmayanlara sosyal ağ hizmeti verilemez. Sadece doğum yılı bilindiği için
+// ihtiyatlı davranılır: bu yıl 15'ine girecek olanın doğum günü henüz gelmemiş olabilir (sunucudaki private.underage ile aynı kural).
+export const MIN_AGE = 15;
+export const underageYear = (y) => !!y && Number(y) > THIS_YEAR - (MIN_AGE + 1);
+export const UNDERAGE_TEXT = 'Rozstram’ı kullanmak için 15 yaşını doldurmuş olmalısın.';
+export const underageNote = (y) => (Number(y) === THIS_YEAR - MIN_AGE
+  ? UNDERAGE_TEXT + ' Bu yıl 15 yaşına giriyorsan ' + (THIS_YEAR + 1) + ' yılının başında kaydolabilirsin.'
+  : UNDERAGE_TEXT);
 
 function PasswordInput({ id, value, onChange, placeholder, autoComplete, onEnter }) {
   const [show, setShow] = useState(false);
@@ -26,13 +34,14 @@ export function LegalSheet({ kind, onClose }) {
           <Fragment>
             <p><b>Topladığımız bilgiler.</b> Kaydolurken verdiğin ad, kullanıcı adı, e-posta adresi ya da telefon numarası; paylaştığın fotoğraf, video, hikaye, yorum ve mesajlar; takip ettiğin hesaplar ve beğenilerin.</p>
             <p><b>Kim görür?</b> Profilin, gönderilerin ve hikayelerin hesabın herkese açıksa tüm Rozstram kullanıcılarına, gizliyse sadece onayladığın takipçilere görünür. E-posta adresin ve telefon numaran kimseye gösterilmez.</p>
-            <p><b>Mesajlar.</b> Mesajların sadece sohbetteki kişilere gösterilir ama uçtan uca şifreli değildir. Şifre, kart bilgisi gibi gizli bilgileri mesajla gönderme.</p>
+            <p><b>Mesajlar.</b> Mesajların sadece sohbetteki kişilere gösterilir. Normal sohbetler uçtan uca şifreli değildir; gizli konuşmalar için şifreli sohbet başlat. Şifre, kart bilgisi gibi gizli bilgileri mesajla gönderme.</p>
+            <p><b>15–18 yaş.</b> 18 yaşından küçüklerin hesabı gizlidir ve herkese açık yapılamaz; takipçi ve takip listeleri başkalarına gösterilmez, mesajları okuyup okumadıkları karşı tarafa bildirilmez, kimseye “takip edebileceğin kişi” olarak önerilmezler ve onlara sadece takip ettikleri kişiler mesaj başlatabilir.</p>
             <p><b>Bilgilerin nerede?</b> Veriler Supabase altyapısında saklanır. Reklam için kullanılmaz, kimseye satılmaz.</p>
             <p><b>Silme.</b> Ayarlar → Hesap → Hesabı sil ile hesabını, gönderilerini, mesajlarını ve dosyalarını kalıcı olarak silebilirsin. Kullanıcı adın güvenlik için kilitli kalır ve başka biri tarafından alınamaz.</p>
           </Fragment>
         ) : (
           <Fragment>
-            <p>Rozstram’ı kullanmak için en az 13 yaşında olmalısın.</p>
+            <p>Rozstram’ı kullanmak için 15 yaşını doldurmuş olmalısın (7578 sayılı Kanun). 15–18 yaş arasındaki hesaplar ek korumalarla çalışır.</p>
             <p>Başkası adına hesap açma, başkasını taklit etme. Kullanıcı adları bir kez alındığında bir daha başkasına verilmez.</p>
             <p>Yasa dışı, nefret söylemi içeren, taciz eden, şiddet veya çıplaklık içeren ya da başkasının telif hakkını ihlal eden içerik paylaşma. Bu tür içerikler ve hesaplar kaldırılabilir.</p>
             <p>Rahatsız eden hesapları engelleyebilir, sessize alabilir ve şikayet edebilirsin.</p>
@@ -121,7 +130,7 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
   const nameOk = name.trim().length >= 1 && pw.length >= 8;
   const unameOk = USERNAME_RE.test(username) && avail === true;
   const age = birth ? THIS_YEAR - Number(birth) : null;
-  const birthOk = age !== null && age >= 13;
+  const birthOk = age !== null && !underageYear(birth);
 
   useEffect(() => {
     if (step !== 'username') return undefined;
@@ -252,8 +261,8 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
               <option value="">Seç</option>
               {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
-            <p className="auth-note">{age !== null && age < 13 ? 'Rozstram’ı kullanmak için en az 13 yaşında olmalısın.'
-              : age !== null && age < 18 ? '18 yaşından küçük olduğun için hesabın gizli başlar, hassas içerik kapalı olur ve seni sadece takip ettiğin kişiler mesajla bulabilir.'
+            <p className={'auth-note' + (age !== null && underageYear(birth) ? ' warn' : '')}>{age !== null && underageYear(birth) ? underageNote(birth)
+              : age !== null && age < 18 ? '18 yaşından küçük olduğun için hesabın gizli olur, takip listelerin başkalarına görünmez, hassas içerik kapalı kalır ve seni sadece takip ettiğin kişiler mesajla bulabilir.'
               : 'Profilinde görünmez. Yaşına uygun bir Rozstram için kullanılır.'}</p>
           </div>
           <p className="auth-p small">Kaydolarak <button className="inline-link" onClick={() => onLegal('terms')}>Kullanım Koşulları</button>’nı ve <button className="inline-link" onClick={() => onLegal('privacy')}>Gizlilik İlkesi</button>’ni kabul etmiş olursun.</p>

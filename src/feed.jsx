@@ -145,17 +145,13 @@ export function StoriesBar() {
 function Suggestions() {
   const app = useApp();
   const [dismissed, setDismissed] = useState({});
+  /* öneriler sunucuda hesaplanır: 18 yaş altı hesaplar kimseye önerilmez, onlara da öneri gösterilmez */
   const list = useMemo(() => {
     const mine = app.following;
-    return Object.keys(app.profiles).filter((u) => u !== app.me.id && !mine.has(u) && !app.requested.has(u) && !dismissed[u] && !app.blocks[u])
-      .map((u) => {
-        const mutual = Object.keys(app.profiles).filter((x) => mine.has(x) && isOn(app.profiles[x].following, u));
-        const followsMe = isOn(app.profiles[u].following, app.me.id);
-        return { u, mutual, score: mutual.length * 3 + (followsMe ? 5 : 0) + (app.profiles[u].avatar ? 1 : 0) + app.profiles[u].at / 1e13 };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 15);
-  }, [app.profiles, app.following, app.requested, dismissed, app.blocks]);
+    return (app.suggest || []).filter((u) => app.profiles[u] && u !== app.me.id && !mine.has(u) && !app.requested.has(u) && !dismissed[u] && !app.blocks[u])
+      .slice(0, 15)
+      .map((u) => ({ u, mutual: Object.keys(app.profiles).filter((x) => mine.has(x) && isOn(app.profiles[x].following, u)) }));
+  }, [app.suggest, app.profiles, app.following, app.requested, dismissed, app.blocks]);
   if (!list.length) return null;
   return (
     <section className="sug">

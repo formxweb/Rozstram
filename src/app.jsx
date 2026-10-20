@@ -9,7 +9,7 @@ import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, S
 import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
 import { AdminScreen, BanSheet } from './admin.jsx';
 import { BannedScreen } from './banned.jsx';
-import { BirthYearScreen } from './age.jsx';
+import { BirthYearScreen, UnderageScreen } from './age.jsx';
 import { SnapCamera, SnapViewer } from './snaps.jsx';
 import { decryptEnc, e2eeSupported, encryptFor, ensureDevice, keysFor } from './e2ee.js';
 import { FavoriteYearSheet, YearRecap } from './recap.jsx';
@@ -53,6 +53,8 @@ function App() {
   const [viewed, setViewed] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [ban, setBan] = useState(null);
+  const [underage, setUnderage] = useState(false);
+  const [suggest, setSuggest] = useState([]);
   const [snaps, setSnaps] = useState({ inbox: [], sent: [] });
   const [reposts, setReposts] = useState({});
   const repostsRef = useRef(reposts); repostsRef.current = reposts;
@@ -168,6 +170,8 @@ function App() {
     setViewed(flag(data.viewed));
     setIsAdmin(!!data.isAdmin);
     setBan(data.ban || null);
+    setUnderage(!!data.underage);
+    setSuggest(Array.isArray(data.suggest) ? data.suggest : []);
     setSnaps(data.snaps || { inbox: [], sent: [] });
     setReposts(() => { const m = {}; (data.reposts || []).forEach(([u, p, at]) => { m[u + ':' + p] = { u, p, at }; }); return m; });
     setFavoriteYearState(data.favoriteYear || null);
@@ -293,7 +297,10 @@ function App() {
           const t = m[r.thread_id];
           if (!t) return m;
           let members = t.members.filter((x) => x.id !== r.user_id);
-          if (ev !== 'DELETE') members = members.concat([{ id: nw.user_id, read: toMs(nw.last_read_at), accepted: nw.accepted, muted: nw.muted }]);
+          /* 18 yaş altında kendi okuma konumu paylaşılan satıra yazılmaz (sunucu ayrı tutar); yerelde ileri gitmiş değeri geri alma */
+          const prev = t.members.find((x) => x.id === r.user_id);
+          const read = nw && nw.user_id === myId && prev ? Math.max(prev.read || 0, toMs(nw.last_read_at) || 0) : toMs(nw && nw.last_read_at);
+          if (ev !== 'DELETE') members = members.concat([{ id: nw.user_id, read, accepted: nw.accepted, muted: nw.muted }]);
           return { ...m, [t.id]: { ...t, members } };
         });
         break;
@@ -1483,7 +1490,7 @@ function App() {
     removeFollower, setCloseFriend, setMute, block, unblock, report, openReport,
     addComment, deleteComment, pinComment, editPost, deletePost,
     publish, shareToStory, markStorySeen, setStoryLike, deleteStory, addToHighlight, removeHighlight, markActivitySeen,
-    viewPost, rankList, isAdmin, admin, settings, openMusic, openBan, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
+    viewPost, rankList, isAdmin, admin, suggest, settings, openMusic, openBan, dmWith, ensureDm, sendMessage, sendTo, reactMessage, unsendMessage, editMessage, markRead, acceptThread, muteThread, leaveThread,
     createGroup, addGroupMembers, renameGroup, loadMessages, onChat, setTyping,
     saveProfile, setPrivacy, setNote, updateContact, changePassword, logout, deleteAccount, copyLink, postUrl, profileUrl,
     ensurePost, loadUserPosts, refresh, finishOnboarding,
@@ -1500,6 +1507,7 @@ function App() {
   }
   if (phase === 'auth') return <AuthScreen sb={sb} onSignedUp={(id) => store.set('onboard:' + id, true)} />;
   if (!loaded) return <BootScreen note={conn === 'down' ? 'Bağlantı kuruluyor…' : null} retry={conn === 'down' ? () => boot(false).then((ok) => setConn(ok ? 'ok' : 'down')) : null} />;
+  if (underage && account && account.birthYear) return <UnderageScreen username={myProfile && myProfile.username} birthYear={account.birthYear} onDelete={deleteAccount} onLogout={logout} />;
   if (ban) return <BannedScreen ban={ban} username={myProfile && myProfile.username} sb={sb} onLogout={logout} onCheck={checkBan} />;
   if (account && !account.birthYear) return <BirthYearScreen sb={sb} username={myProfile && myProfile.username} onDone={birthYearDone} onLogout={logout} />;
 

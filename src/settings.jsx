@@ -82,8 +82,12 @@ export function SettingsScreen() {
         <Row icon="clock" label="En sevdiğin yıl" sub={app.favoriteYear ? app.favoriteYear.year + (app.favoriteYear.season === 'yaz' ? ' · Yazı ☀️' : app.favoriteYear.season === 'kis' ? ' · Kışı ❄️' : '') : 'Henüz seçmedin'} onClick={app.openFavoriteYear} />
 
         <div className="set-head">Kimler görebilir</div>
-        <Row icon="lock" label="Gizli hesap" sub={p.private ? 'Sadece onayladığın takipçiler gönderilerini görür' : 'Herkes profilini ve gönderilerini görebilir'}
-          right={<Toggle id="set-private" on={!!p.private} onChange={(v) => app.setPrivacy({ private: v })} label="Gizli hesap" />} />
+        {app.minor ? (
+          <Row icon="lock" label="Gizli hesap" sub="18 yaşından küçük olduğun için hesabın gizli kalır; takipçi ve takip listelerin başkalarına görünmez." />
+        ) : (
+          <Row icon="lock" label="Gizli hesap" sub={p.private ? 'Sadece onayladığın takipçiler gönderilerini görür' : 'Herkes profilini ve gönderilerini görebilir'}
+            right={<Toggle id="set-private" on={!!p.private} onChange={(v) => app.setPrivacy({ private: v })} label="Gizli hesap" />} />
+        )}
         <Row icon="star" label="Yakın Arkadaşlar" sub={count(app.closeFriends) + ' kişi'} onClick={() => app.push({ type: 'plist', kind: 'close' })} />
         <Row icon="shield" label="Engellenenler" sub={count(app.blocks) + ' hesap'} onClick={() => app.push({ type: 'plist', kind: 'blocked' })} />
         <Row icon="volOff" label="Sessize alınanlar" sub={count(app.mutes) + ' hesap'} onClick={() => app.push({ type: 'plist', kind: 'muted' })} />

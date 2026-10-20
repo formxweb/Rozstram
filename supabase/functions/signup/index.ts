@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
   if (password.length < 8) return json({ error: 'password_short' }, 400);
   if (password.length > 72) return json({ error: 'password_long' }, 400);
   if (birthYear !== null && (!Number.isInteger(birthYear) || birthYear < thisYear - 120 || birthYear > thisYear)) return json({ error: 'birth_year_invalid' }, 400);
-  if (birthYear !== null && thisYear - birthYear < 13) return json({ error: 'too_young' }, 400);
+  if (birthYear !== null && birthYear > thisYear - 16) return json({ error: 'too_young' }, 400);  // 15 yaşını doldurmuş olmalı (7578 sayılı Kanun; şemadaki private.underage ile aynı ihtiyatlı yıl kuralı)
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false, autoRefreshToken: false },

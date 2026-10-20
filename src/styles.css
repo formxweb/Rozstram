@@ -718,6 +718,7 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .auth-p { margin: 0; color: var(--muted); font-size: 14px; text-wrap: pretty; }
 .auth-p.small { font-size: 12.5px; text-align: center; }
 .auth-note { margin: -4px 0 0; color: var(--muted); font-size: 12.5px; min-height: 1em; }
+.auth-note.warn { color: var(--like); font-weight: 600; }
 .auth-summary { display: grid; gap: 8px; background: var(--soft); border-radius: 14px; padding: 14px; }
 .auth-summary div { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .auth-summary span { color: var(--muted); }
