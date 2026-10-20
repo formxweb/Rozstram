@@ -3,7 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { ago, fmt, initialsAvatar, mediaUrl } from './lib.js';
 import { RANK_DEFAULTS, rankWeights } from './rank.js';
-import { Avatar, Empty, Icon, Sheet, Spinner, TopBar, Verified } from './ui.jsx';
+import { Avatar, Empty, Icon, Sheet, Spinner, Toggle, TopBar, Verified } from './ui.jsx';
 import { AdminMusic } from './music.jsx';
 
 const TABS = [['genel', 'Genel'], ['kisi', 'Kullanıcılar'], ['sikayet', 'Şikayetler'], ['algoritma', 'Algoritma'], ['one', 'Öne çıkanlar'], ['muzik', 'Müzik'], ['tik', 'Mavi tik']];
@@ -199,7 +199,43 @@ export function BanSheet({ uid, user, presetNote, onClose, onDone }) {
   );
 }
 
-function UserRow({ u, onBan, onUnban, onReject }) {
+/* Yönetici bir hesabı kalıcı olarak siler (dosyalar dahil). Onay için kullanıcı adı yazılır. */
+export function DeleteUserSheet({ user, onClose, onDone }) {
+  const app = useApp();
+  const [typed, setTyped] = useState('');
+  const [freeName, setFreeName] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ok = typed.trim().replace(/^@/, '').toLowerCase() === user.username;
+  const submit = async () => {
+    if (!ok || busy) return;
+    setBusy(true);
+    const done = await app.admin.deleteUser(user.id, freeName);
+    setBusy(false);
+    if (done) { if (onDone) onDone(); onClose(); }
+  };
+  return (
+    <Sheet onClose={onClose} title="Hesabı sil" z={66}>
+      <div className="g sheet-body ban-sheet">
+        <div className="ban-who">
+          <Avatar uid={user.id} src={userAvatar(user)} size={44} />
+          <div className="grow"><b>@{user.username}</b><span>{user.displayName || ''}{user.posts ? ' · ' + fmt(user.posts) + ' gönderi' : ''}</span></div>
+        </div>
+        <p className="adm-note del-warn">Hesap; gönderileri, hikayeleri, yorumları, mesajları ve yüklediği bütün dosyalarla birlikte <b>kalıcı olarak</b> silinir. Bu işlem geri alınamaz.</p>
+        <div className="set-row static">
+          <span className="grow"><span>Kullanıcı adı serbest kalsın</span><span className="sub">{freeName ? '@' + user.username + ' adını başkası (ya da aynı kişi) yeniden alabilir' : '@' + user.username + ' adı kilitli kalır, kimse alamaz'}</span></span>
+          <Toggle id="del-free" on={freeName} onChange={setFreeName} label="Kullanıcı adı serbest kalsın" />
+        </div>
+        <div className="field"><label htmlFor="del-confirm">Onaylamak için kullanıcı adını yaz</label>
+          <input id="del-confirm" value={typed} placeholder={user.username} autoCapitalize="none" autoCorrect="off" onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} /></div>
+        <div style={{ paddingBlock: '6px 16px' }}>
+          <button className="btn block big danger-solid" id="del-submit" disabled={!ok || busy} onClick={submit}>{busy ? 'Siliniyor…' : 'Hesabı kalıcı olarak sil'}</button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function UserRow({ u, onBan, onUnban, onReject, onDelete }) {
   const app = useApp();
   const b = u.ban;
   return (
@@ -213,6 +249,7 @@ function UserRow({ u, onBan, onUnban, onReject }) {
         {u.admin ? <span className="pill">Yönetici</span>
           : b ? <button className="btn" onClick={() => onUnban(u)}>Banı kaldır</button>
           : <button className="btn danger-btn" onClick={() => onBan(u)}>Banla</button>}
+        {u.admin ? null : <button className="btn icon-sq danger-btn" aria-label={'@' + u.username + ' hesabını sil'} title="Hesabı sil" onClick={() => onDelete(u)}><Icon n="trash" size={18} /></button>}
       </div>
       {b ? (
         <div className="ban-info">
@@ -241,6 +278,7 @@ function UsersTab({ onChange }) {
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [banFor, setBanFor] = useState(null);
+  const [delFor, setDelFor] = useState(null);
   const seq = useRef(0);
   const load = async (query) => {
     const n = ++seq.current;
@@ -251,7 +289,7 @@ function UsersTab({ onChange }) {
   const reload = () => { load(q.trim()); onChange(); };
   const unban = async (u) => { if (await app.admin.unban(u.id)) reload(); };
   const reject = async (u) => { if (await app.admin.rejectAppeal(u.id)) reload(); };
-  const rows = (list) => list.map((u) => <UserRow key={u.id} u={u} onBan={setBanFor} onUnban={unban} onReject={reject} />);
+  const rows = (list) => list.map((u) => <UserRow key={u.id} u={u} onBan={setBanFor} onUnban={unban} onReject={reject} onDelete={setDelFor} />);
   return (
     <Fragment>
       <div className="adm-search"><Icon n="search" size={18} /><input id="adm-user-q" placeholder="Kullanıcı adı ya da isim ara" value={q} onChange={(e) => setQ(e.target.value)} autoCapitalize="none" autoCorrect="off" /></div>
@@ -268,6 +306,7 @@ function UsersTab({ onChange }) {
         </Fragment>
       )}
       {banFor ? <BanSheet uid={banFor.id} user={banFor} onClose={() => setBanFor(null)} onDone={reload} /> : null}
+      {delFor ? <DeleteUserSheet user={delFor} onClose={() => setDelFor(null)} onDone={reload} /> : null}
     </Fragment>
   );
 }

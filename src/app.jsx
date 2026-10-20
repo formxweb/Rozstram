@@ -1252,7 +1252,7 @@ function App() {
   };
   const deleteAccount = async () => {
     try {
-      for (const f of ['p', 's', 'a', 'm']) {
+      for (const f of ['p', 's', 'a', 'm', 'i']) {
         const { data } = await sb.storage.from('media').list(me.id + '/' + f, { limit: 1000 });
         if (data && data.length) await sb.storage.from('media').remove(data.map((x) => me.id + '/' + f + '/' + x.name));
       }
@@ -1296,6 +1296,14 @@ function App() {
       const ok = await adminRpc('admin_restore_post', { pid: id }, 'Gönderi geri getirildi');
       if (ok) { const { data } = await sb.rpc('get_posts', { ids: [id] }); mergeFetched(data); }
       return ok;
+    },
+    deleteUser: async (uid, freeName) => {
+      const { data, error } = await sb.functions.invoke('admin-delete-user', { body: { user_id: uid, free_username: !!freeName } });
+      if (error || !data || !data.ok) { const e = await functionError(error, data); toast(errText({ message: e && e.error }, 'Hesap silinemedi.')); return false; }
+      toast('@' + data.username + ' silindi');
+      setBase((m) => omit(m, uid));
+      setPosts((m) => { const n = {}; Object.keys(m).forEach((k) => { if (m[k].author !== uid) n[k] = m[k]; }); return n; });
+      return true;
     },
     verify: async (uid, v) => {
       const ok = await adminRpc('admin_set_verified', { uid, v }, v ? 'Mavi tik verildi' : 'Mavi tik kaldırıldı');

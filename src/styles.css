@@ -876,6 +876,10 @@ input[type="range"] { width: 100%; accent-color: var(--fg); }
 .ban-btn { background: var(--like); color: #fff; }
 .adm-card.user-card .row-card-in { display: flex; align-items: center; gap: 10px; }
 .adm-card.user-card .row-card-in .btn, .adm-card.user-card .row-card-in .pill { flex: none; }
+.btn.icon-sq { width: 34px; min-width: 34px; padding: 0; display: inline-grid; place-items: center; }
+.set-row.static { cursor: default; }
+.adm-note.del-warn { color: var(--like); }
+.adm-note.del-warn b { font-weight: 800; }
 .adm-card.is-banned { border-color: rgba(237, 73, 86, .35); background: rgba(237, 73, 86, .04); }
 .ban-info { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .ban-info > div:first-child { display: flex; align-items: center; gap: 8px; }

@@ -265,6 +265,22 @@ const server = http.createServer(async (req, res) => {
         await pool.run(`delete from auth.users where id = ${lit(who.sub)}`);
         return sendJson(res, 200, { ok: true });
       }
+      if (p === '/mock/functions/admin-delete-user') { // supabase/functions/admin-delete-user ile aynı kurallar
+        if (who.role !== 'authenticated' || !who.sub) return sendJson(res, 401, { error: 'not_authenticated' });
+        const target = String(b.user_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(target)) return sendJson(res, 400, { error: 'bad_request' });
+        if (!(await pool.one(`select exists (select 1 from public.app_admins where user_id = ${lit(who.sub)})`))) return sendJson(res, 403, { error: 'not_admin' });
+        if (target === who.sub) return sendJson(res, 400, { error: 'self_delete' });
+        if (await pool.one(`select exists (select 1 from public.app_admins where user_id = ${lit(target)})`)) return sendJson(res, 400, { error: 'target_admin' });
+        const uname = await pool.one(`select username from public.profiles where id = ${lit(target)}`);
+        if (!uname) return sendJson(res, 404, { error: 'not_found' });
+        const owned = await pool.one(`select coalesce(json_agg(name), '[]') from public.usernames where user_id = ${lit(target)}`);
+        const names = await pool.one(`with d as (delete from storage.objects where bucket_id = 'media' and name like ${lit(target + '/%')} returning name) select coalesce(json_agg(name), '[]') from d`);
+        (names || []).forEach((n) => { try { fs.unlinkSync(path.join(STORE, n)); fs.unlinkSync(path.join(STORE, n + '.type')); } catch (e) { /* yok */ } });
+        await pool.run(`delete from auth.users where id = ${lit(target)}`);
+        if (b.free_username === true && owned.length) await pool.run(`delete from public.usernames where name in (${owned.map(lit).join(',')}) and user_id is null and not reserved`);
+        return sendJson(res, 200, { ok: true, username: uname, files: names.length });
+      }
       if (p === '/mock/storage/remove') {
         const names = await pool.one(`with d as (delete from storage.objects where bucket_id = 'media' and name in (${(b.paths || []).map(lit).join(',') || 'NULL'}) returning name) select coalesce(json_agg(name), '[]') from d`, 'authenticated', who.sub).catch(() => []);
         (names || []).forEach((n) => { try { fs.unlinkSync(path.join(STORE, n)); fs.unlinkSync(path.join(STORE, n + '.type')); } catch (e) { /* yok */ } });

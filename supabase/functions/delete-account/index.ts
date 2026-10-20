@@ -12,6 +12,23 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
+// media/<prefix> altındaki bütün dosyaların yolları (alt klasörler dahil)
+// deno-lint-ignore no-explicit-any
+async function listAll(bucket: any, prefix: string, depth = 0): Promise<string[]> {
+  const out: string[] = [];
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const { data, error } = await bucket.list(prefix, { limit: 1000, offset });
+    if (error || !data || !data.length) break;
+    for (const f of data) {
+      const p = prefix + '/' + f.name;
+      if (f.id === null || f.id === undefined) { if (depth < 4) out.push(...(await listAll(bucket, p, depth + 1))); }
+      else out.push(p);
+    }
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
@@ -25,16 +42,10 @@ Deno.serve(async (req) => {
   if (whoErr || !who?.user) return json({ error: 'not_authenticated' }, 401);
   const uid = who.user.id;
 
-  // kullanıcının yüklediği dosyalar: media/<uid>/{p,s,a,m}/...
+  // kullanıcının yüklediği bütün dosyalar: media/<uid>/... (gönderi, hikaye, profil, mesaj, şipşak…)
   const bucket = admin.storage.from('media');
-  for (const folder of ['p', 's', 'a', 'm']) {
-    for (let round = 0; round < 20; round++) {
-      const { data: files } = await bucket.list(`${uid}/${folder}`, { limit: 1000 });
-      if (!files || !files.length) break;
-      await bucket.remove(files.map((f) => `${uid}/${folder}/${f.name}`));
-      if (files.length < 1000) break;
-    }
-  }
+  const files = await listAll(bucket, uid);
+  for (let i = 0; i < files.length; i += 500) await bucket.remove(files.slice(i, i + 500));
 
   const { error } = await admin.auth.admin.deleteUser(uid);
   if (error) return json({ error: 'server', detail: error.message }, 500);
