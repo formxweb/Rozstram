@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { errText, functionError } from './backend.js';
 import { USERNAME_RE, normPhone, slugify } from './lib.js';
-import { Icon, Mark, Sheet, Spinner } from './ui.jsx';
+import { Icon, Mark, Sheet, Spinner, useBackClose } from './ui.jsx';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export const THIS_YEAR = new Date().getFullYear();
@@ -170,6 +170,7 @@ function Signup({ sb, onSignedUp, onLegal, onCancel }) {
     else if (step === 'finish') setStep('username');
     else onCancel();
   };
+  useBackClose(back);
   const submit = async () => {
     if (busy || !birthOk) return;
     setBusy(true); setErr('');

@@ -7,6 +7,9 @@ export const useApp = () => useContext(Ctx);
 export const ScreenCtx = createContext(null);
 export const useBack = () => useContext(ScreenCtx);
 
+/** Sayfanın içindeki bir adım akışı (ör. paylaşım oluşturma) geri tuşunu önce kendisi karşılar */
+export const BackInterceptCtx = createContext(null);
+
 /** Açık alt panelin animasyonlu kapanışı */
 export const SheetCtx = createContext(null);
 export const useSheetClose = () => useContext(SheetCtx);

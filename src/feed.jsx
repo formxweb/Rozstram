@@ -4,7 +4,7 @@ import { COMMENT_EMOJIS, ago, fmt, haptic, isOn, mediaUrl, onKeys, postFilter, s
 import { MusicTag, useMusic } from './player.jsx';
 import {
   Avatar, AvatarStack, Empty, FollowButton, HeartBurst, Icon, Mark, PersonRow, RichText, Sheet, SkeletonPost, TopBar, UName, Vid,
-  useInView, useLongPress, useTaps, SensitiveCover } from './ui.jsx';
+  useInView, useLongPress, useTaps, SensitiveCover, useBackClose } from './ui.jsx';
 import { FeedPrompt } from './recap.jsx';
 
 /* ================================================================ ana sayfa */
@@ -382,6 +382,7 @@ export function GridTile({ post, tall, reel, pinned }) {
 
 export function PeekModal({ postId, onClose }) {
   const app = useApp();
+  useBackClose(onClose);
   const post = app.postById[postId];
   if (!post) return null;
   const m = (post.media || [])[0] || {};

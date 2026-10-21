@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { mediaUrl, store } from './lib.js';
-import { Avatar, Icon, Sheet, Spinner } from './ui.jsx';
+import { Avatar, Icon, Sheet, Spinner, useBackClose } from './ui.jsx';
 
 const NOW = () => new Date();
 export const recapYear = () => { const d = NOW(); return d.getMonth() === 0 ? d.getFullYear() - 1 : d.getFullYear(); };
@@ -138,6 +138,7 @@ export function YearRecap({ onClose }) {
   const [err, setErr] = useState(false);
   const [i, setI] = useState(0);
   const [fyDone, setFyDone] = useState(false);
+  useBackClose(onClose);
   const [sharing, setSharing] = useState(false);
   const me = app.myProfile || {};
   useEffect(() => {

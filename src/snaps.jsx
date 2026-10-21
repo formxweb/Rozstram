@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { ago, compressImage, haptic, mediaUrl, store } from './lib.js';
-import { Avatar, Icon, Sheet, Spinner } from './ui.jsx';
+import { Avatar, Icon, Sheet, Spinner, useBackClose } from './ui.jsx';
 
 const REACTIONS = ['❤️', '😂', '😮', '🔥', '👏'];
 
@@ -164,6 +164,7 @@ export function SnapViewer({ uid, onClose }) {
   const [react, setReact] = useState(null);
   const [paused, setPaused] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  useBackClose(onClose);
   const cur = items[i];
   useEffect(() => { if (cur) app.openSnap(cur.id); setLoaded(false); setReact(null); }, [i]);
   useEffect(() => {

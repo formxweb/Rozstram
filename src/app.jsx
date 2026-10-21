@@ -5,7 +5,7 @@ import {
   CONFIG, getClient, iso, rowComment, rowMessage, rowNotification, rowPost, rowProfile, rowStory, rowThread, toMs, uuid, errText, errCodeOf, functionError,
 } from './backend.js';
 import { DAY, MAX_UPLOAD, compressImage, haptic, initialsAvatar, isOn, mediaUrl, omit, onKeys, rid, shareLink, store, videoInfo, snapshotFile } from './lib.js';
-import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner } from './ui.jsx';
+import { ActionSheet, Avatar, ConfirmDialog, Empty, Icon, Mark, Screen, Sheet, Spinner, runBack } from './ui.jsx';
 import { interestModel, isVideo, rankPosts, rankWeights, scorePost } from './rank.js';
 import { AdminScreen, BanSheet } from './admin.jsx';
 import { BannedScreen } from './banned.jsx';
@@ -1391,6 +1391,37 @@ function App() {
     setStack([]); setTab(t); setPanel(null);
     setVisited((v) => (v[t] ? v : { ...v, [t]: true }));
   };
+  /* telefonun geri tuşu: uygulamadan çıkmak yerine en üstteki katmanı kapatır (alt panel, hikaye, sayfa…),
+     sonra ana sekmeye döner; ana sayfada iki kez basınca çıkılır. Tarayıcı geçmişinde hep bir "tuzak" kayıt tutulur. */
+  const backNav = useRef(null);
+  backNav.current = () => {
+    if (runBack()) return true;
+    if (stack.length) { popTo(stack.length - 1); return true; }
+    if (phase === 'ready' && tab !== 'home') { goTab('home'); return true; }
+    return false;
+  };
+  useEffect(() => {
+    let armed = false;
+    const arm = () => {
+      if (armed) return;
+      try { history.pushState({ roz: 'geri' }, ''); armed = true; } catch (e) { /* yok say */ }
+    };
+    const onPop = () => {
+      armed = false;
+      if (backNav.current && backNav.current()) { arm(); return; }
+      toast('Çıkmak için tekrar geri bas');  // tuzak kurulmadı: bir daha basarsa uygulama kapanır
+    };
+    const onUse = () => arm();  // dokununca tuzak yeniden kurulur
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('pointerdown', onUse, true);
+    window.addEventListener('keydown', onUse, true);
+    arm();
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('pointerdown', onUse, true);
+      window.removeEventListener('keydown', onUse, true);
+    };
+  }, []);
   const openUser = (uid) => { setPanel(null); setStoryView(null); if (uid === me.id) { goTab('profile'); return; } push({ type: 'user', uid }); };
   const openPost = (id) => { setPanel(null); push({ type: 'post', id }); };
   const openStories = (uid) => {

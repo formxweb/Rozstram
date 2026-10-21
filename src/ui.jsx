@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ScreenCtx, SheetCtx, useApp, useBack, useSheetClose } from './ctx.js';
+import { BackInterceptCtx, ScreenCtx, SheetCtx, useApp, useBack, useSheetClose } from './ctx.js';
 import { isOn } from './lib.js';
 
 /* ------------------------------------------------------------------ ikonlar */
@@ -139,6 +139,40 @@ export function useTaps(onSingle, onDouble) {
 }
 
 /** Basılı tutma: { handlers, fired } — fired.current true ise ardından gelen tıklamayı yok say */
+/* ------------------------------------------------------------------ telefonun geri tuşu
+   Açık katmanlar (sayfa, alt panel, hikaye, onay penceresi…) kendini bu yığına kaydeder;
+   geri tuşu en son açılanı kapatır (bkz. app.jsx: popstate). */
+const BACK = [];
+export function useBackClose(fn, on = true) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    if (!on) return undefined;
+    const entry = () => { if (ref.current) ref.current(); };
+    BACK.push(entry);
+    return () => { const i = BACK.lastIndexOf(entry); if (i >= 0) BACK.splice(i, 1); };
+  }, [on]);
+}
+/** En üstteki katmanı kapatır; kapatacak bir şey yoksa false */
+export function runBack() {
+  const top = BACK[BACK.length - 1];
+  if (!top) return false;
+  top();
+  return true;
+}
+/** Sayfa içindeki adımlar: fn true dönerse geri tuşu sayfayı kapatmaz (adım geri gider) */
+export function useBackIntercept(fn) {
+  const holder = useContext(BackInterceptCtx);
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    if (!holder) return undefined;
+    const f = () => ref.current && ref.current();
+    holder.current = f;
+    return () => { if (holder.current === f) holder.current = null; };
+  }, [holder]);
+}
+
 export function useLongPress(onLong, ms, onRelease) {
   const timer = useRef(null);
   const start = useRef(null);
@@ -308,6 +342,8 @@ export function Screen({ onBack, children, z, up, dark }) {
     setLeaving(true);
     setTimeout(onBack, 240);
   }, [onBack]);
+  const intercept = useRef(null);
+  useBackClose(() => { if (intercept.current && intercept.current()) return; back(); });
   const onDown = (e) => { drag.current = { x: e.clientX }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* yok say */ } };
   const onMove = (e) => { if (drag.current) setDx(Math.max(0, e.clientX - drag.current.x)); };
   const onUp = (e) => {
@@ -323,7 +359,7 @@ export function Screen({ onBack, children, z, up, dark }) {
   else if (dx) { style.transform = 'translateX(' + dx + 'px)'; style.transition = 'none'; }
   return (
     <div ref={ref} className={'page' + (up ? ' up' : '') + (dark ? ' dark' : '') + (leaving ? ' leaving' : '')} style={style}>
-      <ScreenCtx.Provider value={back}>{children}</ScreenCtx.Provider>
+      <BackInterceptCtx.Provider value={intercept}><ScreenCtx.Provider value={back}>{children}</ScreenCtx.Provider></BackInterceptCtx.Provider>
       {!up ? <div className="edge" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} /> : null}
     </div>
   );
@@ -359,6 +395,7 @@ export function Sheet({ onClose, title, children, tall, footer, z, dark, classNa
     setClosing(true);
     setTimeout(onClose, 210);
   }, [onClose]);
+  useBackClose(close);
   const onDown = (e) => { drag.current = { y: e.clientY, t: Date.now() }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* yok say */ } };
   const onMove = (e) => { if (drag.current) setDy(Math.max(0, e.clientY - drag.current.y)); };
   const onUp = (e) => {
@@ -410,6 +447,7 @@ function ActionList({ items, header }) {
 }
 export function ConfirmDialog({ c, onClose }) {
   const cancel = () => { onClose(); if (c.onCancel) c.onCancel(); };
+  useBackClose(cancel);
   return (
     <div className="scrim center" style={{ zIndex: 90 }} onClick={cancel}>
       <div className="dialog" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>

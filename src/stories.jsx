@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { QUICK_EMOJIS, STORY_BGS, ago, filterCss, haptic, isOn, mediaUrl, onKeys, postFilter } from './lib.js';
-import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Vid } from './ui.jsx';
+import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Vid, useBackClose } from './ui.jsx';
 import { MusicTag, useMusic } from './player.jsx';
 
 export function StoryText({ t, small }) {
@@ -69,6 +69,7 @@ export function StoryViewer({ groups, index, highlight, archive, startAt, onClos
   useMusic(story && story.music, !!story && !stopped, 'story:' + (story ? story.id : ''));
 
   const close = () => { if (closing) return; setClosing(true); setTimeout(onClose, 200); };
+  useBackClose(close);
   useEffect(() => { if (!story) close(); }, [!!story]);
   useEffect(() => {
     if (!story) return;

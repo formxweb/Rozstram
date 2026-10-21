@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp, useBack } from './ctx.js';
 import { rowMessage, toMs } from './backend.js';
 import { REACTIONS, ago, copyText, haptic, mediaUrl, postFilter, snapshotFile } from './lib.js';
-import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Spinner, Toggle, TopBar, UName, useLongPress, useTaps } from './ui.jsx';
+import { Avatar, AvatarStack, Empty, Icon, PersonRow, Sheet, Spinner, Toggle, TopBar, UName, useBackClose, useLongPress, useTaps } from './ui.jsx';
 import { SnapStrip } from './snaps.jsx';
 import { keysFor, safetyCode } from './e2ee.js';
 
@@ -287,6 +287,7 @@ function pickMime() {
 
 function VoiceRecorder({ onSend, onCancel }) {
   const app = useApp();
+  useBackClose(onCancel);
   const [sec, setSec] = useState(0);
   const [ready, setReady] = useState(false);
   const rec = useRef(null);
@@ -361,6 +362,7 @@ export function ChatScreen({ tid }) {
   const [sending, setSending] = useState(0);
   const [recording, setRecording] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+  useBackClose(() => setLightbox(null), !!lightbox);
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const typingTimer = useRef(null);

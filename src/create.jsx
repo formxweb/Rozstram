@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useApp } from './ctx.js';
 import { ADJUSTS, FILTERS, MAX_UPLOAD, STORY_BGS, STORY_FONTS, TEXT_COLORS, filterCss, haptic, snapshotFile } from './lib.js';
-import { Avatar, Empty, Icon, PersonRow, Sheet, Toggle, TopBar, Vid } from './ui.jsx';
+import { Avatar, Empty, Icon, PersonRow, Sheet, Toggle, TopBar, Vid, useBackIntercept } from './ui.jsx';
 import { StoryText } from './stories.jsx';
 import { MusicPicker } from './music.jsx';
 import { MusicTag, pauseMusic, playMusic, stopMusic } from './player.jsx';
@@ -124,6 +124,13 @@ export function CreateFlow({ mode: initialMode, music: initialMusic, onDone }) {
     else if (step === 'edit' || step === 'story' || step === 'text') reset();
     else onDone();
   };
+  /* telefonun geri tuşu: önce yazı düzenleme kapanır, sonra adım adım geri gidilir; ilk adımda sayfa kapanır */
+  useBackIntercept(() => {
+    if (editingText) { setEditingText(false); return true; }
+    if (step === 'pick') return false;
+    back();
+    return true;
+  });
 
   /* ---------------- hikaye: yazı modu ---------------- */
   if (step === 'text') {
